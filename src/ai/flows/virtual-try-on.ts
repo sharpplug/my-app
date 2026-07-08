@@ -56,7 +56,7 @@ const virtualTryOnFlow = ai.defineFlow(
         },
     });
 
-    const imageUrl = Array.isArray(media) ? media.find(m => !!m.url)?.url : media.url;
+    const imageUrl = Array.isArray(media) ? media.find(m => !!m.url)?.url : media?.url;
 
     if (!imageUrl) {
       throw new Error('Image generation failed.');

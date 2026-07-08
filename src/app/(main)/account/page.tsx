@@ -50,6 +50,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 const SettingsTab = () => {
     const { region, setRegion, language, setLanguage, dataSaver, setDataSaver } = useRegional();

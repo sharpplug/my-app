@@ -45,7 +45,7 @@ const generateStoryFlow = ai.defineFlow(
         prompt: storyOutput.imagePrompt,
     });
     
-    if (!media.url) {
+    if (!media?.url) {
         throw new Error('Image generation failed.');
     }
 

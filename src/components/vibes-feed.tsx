@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { generateVibeVideoAction, recommendVibes, generateStoryAction, analyzeVibePost, AnalyzeVibePostOutput } from "@/app/actions";
 import CameraView from "./camera-view";
 import { Badge } from "./ui/badge";
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "./ui/card";
 import { Watermark } from "./watermark";
 import { ScrollArea } from "./ui/scroll-area";
 import { Input } from "./ui/input";
@@ -57,7 +58,7 @@ const formatTimestamp = (date: Date | string, now: Date): string => {
 };
 
 const LiveStreamViewer = ({ post, open, onOpenChange }: { post: any | null; open: boolean; onOpenChange: (open: boolean) => void; }) => {
-    const [comments, setComments] = useState<{ id: number, user: string, text: string, type?: 'chat' | 'gift' }>([
+    const [comments, setComments] = useState<{ id: number, user: string, text: string, type?: 'chat' | 'gift' }[]>([
         { id: 1, user: 'Omar', text: 'Love that dress!', type: 'chat' },
         { id: 2, user: 'Ali', text: 'Greetings from Abu Dhabi! 🇦🇪', type: 'chat' }
     ]);

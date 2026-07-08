@@ -10,6 +10,8 @@
 import {ai} from '@/ai/genkit';
 import { PlanMyDayInputSchema, PlanMyDayOutputSchema, PlanMyDayInput, PlanMyDayOutput } from './plan-my-day.types';
 
+export type { PlanMyDayInput, PlanMyDayOutput };
+
 export async function planMyDay(input: PlanMyDayInput): Promise<PlanMyDayOutput> {
   return planMyDayFlow(input);
 }
