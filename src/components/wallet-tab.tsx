@@ -1,54 +1,129 @@
 "use client";
 
-import React, { useState, useTransition, useMemo } from "react";
+import React, { useState, useTransition, useMemo, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { 
-    Wallet, 
-    ArrowUpRight, 
-    ArrowDownLeft, 
-    Landmark, 
-    Smartphone, 
-    Coins, 
-    History, 
-    Plus, 
-    Search, 
-    Loader2, 
-    CheckCircle2, 
+import {
+    ArrowUpRight,
+    Landmark,
+    Smartphone,
+    Loader2,
     Info,
     RefreshCw,
-    Gift,
-    ShieldCheck,
-    Send
+    Send,
+    History,
+    ArrowDownLeft,
+    ArrowLeftRight,
+    AlertTriangle,
+    Plus
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { 
-    Dialog, 
-    DialogContent, 
-    DialogHeader, 
-    DialogTitle, 
-    DialogDescription, 
-    DialogFooter, 
-    DialogClose 
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "./ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useRegional } from "@/contexts/language-provider";
+import { useAuth } from "@/contexts/auth-provider";
+import {
+    ensureWallet,
+    subscribeToWallet,
+    subscribeToTransactions,
+    sendFunds,
+    topUpFunds,
+    swapAssets,
+    TRANSACTION_FEE_PERCENT,
+    MOOOD_TOKEN_RATE,
+    type WalletTransaction,
+} from "@/lib/wallet";
 
-const TRANSACTION_FEE_PERCENT = 0.005; // 0.5% fee for P2P
+function formatTxTime(tx: WalletTransaction) {
+    const date = tx.createdAt?.toDate();
+    if (!date) return "Just now";
+    return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function TransactionRow({ tx, currencySymbol }: { tx: WalletTransaction; currencySymbol: string }) {
+    const isCredit = tx.type === 'topup' || (tx.type === 'swap' && tx.direction === 'tokenToCash');
+    const label =
+        tx.type === 'send' ? `Sent to ${tx.recipient}` :
+        tx.type === 'topup' ? `Top Up via ${tx.rail}` :
+        tx.direction === 'cashToToken' ? 'Swapped cash for MOOOD' : 'Swapped MOOOD for cash';
+
+    return (
+        <div className="flex items-center justify-between p-3 border-b last:border-b-0 border-white/5">
+            <div className="flex items-center gap-3">
+                <div className={cn("p-2 rounded-lg", isCredit ? "bg-green-500/10 text-green-500" : "bg-primary/10 text-primary")}>
+                    {tx.type === 'swap' ? <ArrowLeftRight className="w-4 h-4" /> : isCredit ? <ArrowDownLeft className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                </div>
+                <div>
+                    <p className="text-sm font-bold">{label}</p>
+                    <p className="text-[10px] text-muted-foreground">{formatTxTime(tx)}</p>
+                </div>
+            </div>
+            <p className={cn("text-sm font-bold", isCredit ? "text-green-500" : "text-foreground")}>
+                {tx.type === 'swap'
+                    ? (tx.direction === 'cashToToken' ? `-${currencySymbol}${tx.amount.toFixed(2)}` : `-${tx.amount.toFixed(2)} MOOOD`)
+                    : `${isCredit ? '+' : '-'}${currencySymbol}${tx.amount.toFixed(2)}`}
+            </p>
+        </div>
+    );
+}
 
 export default function WalletTab() {
     const { currency, region } = useRegional();
-    const [balance, setBalance] = useState(2450.50);
-    const [tokenBalance, setTokenBalance] = useState(125.00);
+    const { user } = useAuth();
+    const { toast } = useToast();
+
+    const [balance, setBalance] = useState(0);
+    const [tokenBalance, setTokenBalance] = useState(0);
+    const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+    const [walletError, setWalletError] = useState<string | null>(null);
+    const [isWalletReady, setIsWalletReady] = useState(false);
+
     const [isTransferOpen, setIsTransferOpen] = useState(false);
+    const [isTopUpOpen, setIsTopUpOpen] = useState(false);
+    const [isSwapOpen, setIsSwapOpen] = useState(false);
+
     const [recipient, setRecipient] = useState("");
     const [amount, setAmount] = useState("");
+    const [topUpAmount, setTopUpAmount] = useState("");
+    const [swapAmount, setSwapAmount] = useState("");
+    const [swapDirection, setSwapDirection] = useState<"cashToToken" | "tokenToCash">("cashToToken");
+
     const [isPending, startTransition] = useTransition();
-    const { toast } = useToast();
+
+    useEffect(() => {
+        if (!user) return;
+        let unsubWallet = () => {};
+        let unsubTx = () => {};
+
+        ensureWallet(user.uid)
+            .then(() => {
+                unsubWallet = subscribeToWallet(user.uid, (wallet) => {
+                    setBalance(wallet.balance);
+                    setTokenBalance(wallet.tokenBalance);
+                    setIsWalletReady(true);
+                });
+                unsubTx = subscribeToTransactions(user.uid, setTransactions);
+            })
+            .catch((err) => {
+                console.error(err);
+                setWalletError("Couldn't load your wallet. Firestore may not be reachable or its security rules aren't deployed yet.");
+            });
+
+        return () => {
+            unsubWallet();
+            unsubTx();
+        };
+    }, [user]);
 
     const calculatedFee = useMemo(() => {
         const val = parseFloat(amount);
@@ -77,32 +152,79 @@ export default function WalletTab() {
     }, [region]);
 
     const handleTransfer = () => {
+        if (!user) return;
         const numAmount = parseFloat(amount);
         if (!recipient || isNaN(numAmount) || numAmount <= 0) {
             toast({ variant: 'destructive', title: "Invalid Input" });
             return;
         }
 
-        const fee = numAmount * TRANSACTION_FEE_PERCENT;
-        const total = numAmount + fee;
+        startTransition(async () => {
+            try {
+                await sendFunds(user.uid, recipient, numAmount);
+                setIsTransferOpen(false);
+                setRecipient("");
+                setAmount("");
+                toast({ title: "Transfer Sent!", description: `Sent ${currency.symbol} ${numAmount.toFixed(2)} to ${recipient}.` });
+            } catch (err) {
+                toast({ variant: 'destructive', title: "Transfer Failed", description: err instanceof Error ? err.message : "Please try again." });
+            }
+        });
+    };
 
-        if (total > balance) {
-            toast({ variant: 'destructive', title: "Insufficient Funds" });
+    const handleTopUp = () => {
+        if (!user) return;
+        const numAmount = parseFloat(topUpAmount);
+        if (isNaN(numAmount) || numAmount <= 0) {
+            toast({ variant: 'destructive', title: "Invalid Amount" });
             return;
         }
 
         startTransition(async () => {
-            await new Promise(r => setTimeout(r, 1500));
-            setBalance(prev => prev - total);
-            setIsTransferOpen(false);
-            setRecipient("");
-            setAmount("");
-            toast({ 
-                title: "Transfer Sent!", 
-                description: `Sent ${currency.symbol} ${numAmount.toFixed(2)} to ${recipient}.` 
-            });
+            try {
+                await topUpFunds(user.uid, numAmount, regionalPaymentRails[0].name);
+                setIsTopUpOpen(false);
+                setTopUpAmount("");
+                toast({ title: "Top Up Successful!", description: `Added ${currency.symbol} ${numAmount.toFixed(2)} via ${regionalPaymentRails[0].name}.` });
+            } catch (err) {
+                toast({ variant: 'destructive', title: "Top Up Failed", description: err instanceof Error ? err.message : "Please try again." });
+            }
         });
     };
+
+    const handleSwap = () => {
+        if (!user) return;
+        const numAmount = parseFloat(swapAmount);
+        if (isNaN(numAmount) || numAmount <= 0) {
+            toast({ variant: 'destructive', title: "Invalid Amount" });
+            return;
+        }
+
+        startTransition(async () => {
+            try {
+                await swapAssets(user.uid, swapDirection, numAmount);
+                setIsSwapOpen(false);
+                setSwapAmount("");
+                toast({ title: "Swap Complete!" });
+            } catch (err) {
+                toast({ variant: 'destructive', title: "Swap Failed", description: err instanceof Error ? err.message : "Please try again." });
+            }
+        });
+    };
+
+    if (walletError) {
+        return (
+            <Card className="border-destructive/30 bg-destructive/5">
+                <CardContent className="p-6 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+                    <div>
+                        <p className="text-sm font-bold text-destructive">Wallet Unavailable</p>
+                        <p className="text-xs text-muted-foreground mt-1">{walletError}</p>
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
 
     return (
         <div className="space-y-6 pb-10">
@@ -113,14 +235,18 @@ export default function WalletTab() {
                         <CardTitle className="text-xs font-bold tracking-widest uppercase opacity-70">Main Balance ({currency.code})</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-4xl font-bold font-headline tracking-tighter">{currency.symbol} {balance.toLocaleString()}</div>
+                        {isWalletReady ? (
+                            <div className="text-4xl font-bold font-headline tracking-tighter">{currency.symbol} {balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        ) : (
+                            <div className="h-10 flex items-center"><Loader2 className="w-5 h-5 animate-spin opacity-70" /></div>
+                        )}
                         <p className="text-[10px] mt-2 text-white/60">P2P Transfers enabled • 0.5% Global Fee</p>
                     </CardContent>
                     <CardFooter className="flex gap-2">
-                        <Button variant="secondary" className="w-full bg-white/10 hover:bg-white/20 text-white border-0" onClick={() => setIsTransferOpen(true)}>
+                        <Button variant="secondary" className="w-full bg-white/10 hover:bg-white/20 text-white border-0" onClick={() => setIsTransferOpen(true)} disabled={!isWalletReady}>
                             <ArrowUpRight className="w-4 h-4 mr-2" /> Send
                         </Button>
-                        <Button variant="secondary" className="w-full bg-white/10 hover:bg-white/20 text-white border-0">
+                        <Button variant="secondary" className="w-full bg-white/10 hover:bg-white/20 text-white border-0" onClick={() => setIsTopUpOpen(true)} disabled={!isWalletReady}>
                             <Plus className="w-4 h-4 mr-2" /> Top Up
                         </Button>
                     </CardFooter>
@@ -131,11 +257,15 @@ export default function WalletTab() {
                         <CardTitle className="text-xs font-bold tracking-widest uppercase text-amber-400">Tokens & Rewards</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-4xl font-bold font-headline tracking-tighter text-amber-400">{tokenBalance.toLocaleString()} <span className="text-sm font-body">MOOOD</span></div>
-                        <p className="text-[10px] mt-2 text-zinc-500">Tokenized engagement assets (IoT Compatible)</p>
+                        {isWalletReady ? (
+                            <div className="text-4xl font-bold font-headline tracking-tighter text-amber-400">{tokenBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} <span className="text-sm font-body">MOOOD</span></div>
+                        ) : (
+                            <div className="h-10 flex items-center"><Loader2 className="w-5 h-5 animate-spin text-amber-400/70" /></div>
+                        )}
+                        <p className="text-[10px] mt-2 text-zinc-500">1 MOOOD = {currency.symbol} {MOOOD_TOKEN_RATE.toFixed(2)}</p>
                     </CardContent>
                     <CardFooter>
-                        <Button variant="outline" className="w-full border-amber-400/30 text-amber-400 hover:bg-amber-400/10">
+                        <Button variant="outline" className="w-full border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={() => setIsSwapOpen(true)} disabled={!isWalletReady}>
                             <RefreshCw className="w-4 h-4 mr-2" /> Swap Assets
                         </Button>
                     </CardFooter>
@@ -160,6 +290,19 @@ export default function WalletTab() {
                 </CardContent>
             </Card>
 
+            <Card className="border-white/10 bg-card/50">
+                <CardHeader>
+                    <CardTitle className="text-lg font-headline flex items-center gap-2"><History className="w-5 h-5"/> Transaction History</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                    {transactions.length === 0 ? (
+                        <p className="text-xs text-muted-foreground p-4 text-center">No transactions yet.</p>
+                    ) : (
+                        transactions.map(tx => <TransactionRow key={tx.id} tx={tx} currencySymbol={currency.symbol} />)
+                    )}
+                </CardContent>
+            </Card>
+
             <Dialog open={isTransferOpen} onOpenChange={setIsTransferOpen}>
                 <DialogContent className="max-w-md sm:rounded-[2rem] border-white/10 bg-zinc-950 text-white">
                     <DialogHeader>
@@ -169,10 +312,7 @@ export default function WalletTab() {
                     <div className="space-y-6 py-6">
                         <div className="space-y-2">
                             <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">Recipient</Label>
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500"/>
-                                <Input placeholder="Name or @handle" className="pl-9 bg-white/5 border-white/10 h-12 rounded-xl" value={recipient} onChange={e => setRecipient(e.target.value)} />
-                            </div>
+                            <Input placeholder="Name or @handle" className="bg-white/5 border-white/10 h-12 rounded-xl" value={recipient} onChange={e => setRecipient(e.target.value)} />
                         </div>
                         <div className="space-y-2">
                             <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">Amount ({currency.symbol})</Label>
@@ -186,6 +326,66 @@ export default function WalletTab() {
                     <DialogFooter>
                         <Button className="w-full h-14 text-lg font-bold rounded-xl" onClick={handleTransfer} disabled={isPending || !amount || !recipient}>
                             {isPending ? <Loader2 className="animate-spin mr-2"/> : <Send className="mr-2"/>} Confirm & Send
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isTopUpOpen} onOpenChange={setIsTopUpOpen}>
+                <DialogContent className="max-w-md sm:rounded-[2rem] border-white/10 bg-zinc-950 text-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-headline text-2xl">Top Up Balance</DialogTitle>
+                        <DialogDescription className="text-zinc-400">Add funds via {regionalPaymentRails[0].name}.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-6 py-6">
+                        <div className="space-y-2">
+                            <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">Amount ({currency.symbol})</Label>
+                            <Input type="number" placeholder="0.00" className="bg-white/5 border-white/10 h-14 text-2xl font-bold rounded-xl" value={topUpAmount} onChange={e => setTopUpAmount(e.target.value)} />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button className="w-full h-14 text-lg font-bold rounded-xl" onClick={handleTopUp} disabled={isPending || !topUpAmount}>
+                            {isPending ? <Loader2 className="animate-spin mr-2"/> : <ArrowDownLeft className="mr-2"/>} Confirm Top Up
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isSwapOpen} onOpenChange={setIsSwapOpen}>
+                <DialogContent className="max-w-md sm:rounded-[2rem] border-white/10 bg-zinc-950 text-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-headline text-2xl">Swap Assets</DialogTitle>
+                        <DialogDescription className="text-zinc-400">Exchange between cash and MOOOD tokens at a fixed rate of 1 MOOOD = {currency.symbol} {MOOOD_TOKEN_RATE.toFixed(2)}.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-6 py-6">
+                        <div className="grid grid-cols-2 gap-2">
+                            <Button variant={swapDirection === 'cashToToken' ? 'default' : 'outline'} className="h-12 rounded-xl" onClick={() => setSwapDirection('cashToToken')}>
+                                {currency.code} → MOOOD
+                            </Button>
+                            <Button variant={swapDirection === 'tokenToCash' ? 'default' : 'outline'} className="h-12 rounded-xl" onClick={() => setSwapDirection('tokenToCash')}>
+                                MOOOD → {currency.code}
+                            </Button>
+                        </div>
+                        <div className="space-y-2">
+                            <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">
+                                Amount ({swapDirection === 'cashToToken' ? currency.symbol : 'MOOOD'})
+                            </Label>
+                            <Input type="number" placeholder="0.00" className="bg-white/5 border-white/10 h-14 text-2xl font-bold rounded-xl" value={swapAmount} onChange={e => setSwapAmount(e.target.value)} />
+                        </div>
+                        {!!parseFloat(swapAmount) && (
+                            <p className="text-xs text-zinc-400">
+                                You'll receive{' '}
+                                <span className="font-bold text-white">
+                                    {swapDirection === 'cashToToken'
+                                        ? `${(parseFloat(swapAmount) / MOOOD_TOKEN_RATE).toFixed(2)} MOOOD`
+                                        : `${currency.symbol} ${(parseFloat(swapAmount) * MOOOD_TOKEN_RATE).toFixed(2)}`}
+                                </span>
+                            </p>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button className="w-full h-14 text-lg font-bold rounded-xl" onClick={handleSwap} disabled={isPending || !swapAmount}>
+                            {isPending ? <Loader2 className="animate-spin mr-2"/> : <ArrowLeftRight className="mr-2"/>} Confirm Swap
                         </Button>
                     </DialogFooter>
                 </DialogContent>

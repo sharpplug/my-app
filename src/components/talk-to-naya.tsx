@@ -113,14 +113,50 @@ export default function TalkToNaya({ open, onOpenChange }: { open: boolean; onOp
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isPending, startTransition] = useTransition();
+  const [isRecording, setIsRecording] = useState(false);
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
         scrollAreaRef.current.scrollTo({ top: scrollAreaRef.current.scrollHeight, behavior: 'smooth' });
     }
   }, [messages]);
+
+  useEffect(() => {
+    return () => recognitionRef.current?.abort();
+  }, []);
+
+  const handleMicClick = () => {
+    const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionImpl) {
+      toast({
+        variant: 'destructive',
+        title: "Voice Input Unsupported",
+        description: "Your browser doesn't support speech recognition. Try Chrome or Edge.",
+      });
+      return;
+    }
+
+    const recognition: SpeechRecognition = new SpeechRecognitionImpl();
+    recognitionRef.current = recognition;
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = event.results[0]?.[0]?.transcript;
+      if (transcript) setInput(transcript);
+    };
+    recognition.onerror = () => {
+      toast({ variant: 'destructive', title: "Didn't catch that", description: "Please try speaking again." });
+    };
+    recognition.onend = () => setIsRecording(false);
+
+    recognition.start();
+  };
 
   const handleSend = () => {
     if (!input.trim()) return;
@@ -198,7 +234,14 @@ export default function TalkToNaya({ open, onOpenChange }: { open: boolean; onOp
               rows={1}
             />
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              <Button type="button" size="icon" variant="ghost" className="rounded-full">
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className={cn("rounded-full", isRecording && "text-red-500 animate-pulse")}
+                onClick={handleMicClick}
+                disabled={isRecording}
+              >
                 <Mic className="w-5 h-5" />
               </Button>
               <Button type="button" size="icon" className="rounded-full" onClick={handleSend} disabled={isPending || !input.trim()}>

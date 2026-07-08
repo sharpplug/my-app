@@ -102,15 +102,47 @@ export default function NayaCall({ open, onOpenChange }: NayaCallProps) {
     });
   };
 
-  // Simulate "listening" - in a real app you'd use browser Web Speech API for STT
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+
   const handleTalkToNaya = () => {
-    setIsRecording(true);
-    // Mock user speech for MVP demo
-    setTimeout(() => {
-      setIsRecording(false);
-      handleSpeak("Hey Naya, can you see me? How's my vibe today?");
-    }, 2000);
+    const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognitionImpl) {
+      toast({
+        variant: 'destructive',
+        title: "Voice Input Unsupported",
+        description: "Your browser doesn't support speech recognition. Try Chrome or Edge.",
+      });
+      return;
+    }
+
+    const recognition: SpeechRecognition = new SpeechRecognitionImpl();
+    recognitionRef.current = recognition;
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => setIsRecording(true);
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = event.results[0]?.[0]?.transcript;
+      if (transcript) {
+        handleSpeak(transcript);
+      }
+    };
+
+    recognition.onerror = () => {
+      toast({ variant: 'destructive', title: "Didn't catch that", description: "Please try speaking again." });
+    };
+
+    recognition.onend = () => setIsRecording(false);
+
+    recognition.start();
   };
+
+  useEffect(() => {
+    return () => recognitionRef.current?.abort();
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /wallets/{uid} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      function hasValidBalances() {
+        return request.resource.data.balance is number
+          && request.resource.data.balance >= 0
+          && request.resource.data.tokenBalance is number
+          && request.resource.data.tokenBalance >= 0;
+      }
+
+      allow read: if isOwner();
+
+      allow create: if isOwner()
+        && request.resource.data.uid == uid
+        && hasValidBalances();
+
+      // The client SDK performs balance changes itself (there is no backend
+      // service in this app), so rules can't fully validate the arithmetic
+      // of a transfer/top-up/swap. We at least pin down the invariants that
+      // matter: the doc can't be reassigned to another user, and neither
+      // balance can be written negative.
+      allow update: if isOwner()
+        && request.resource.data.uid == resource.data.uid
+        && hasValidBalances();
+
+      allow delete: if false;
+
+      match /transactions/{txId} {
+        allow read: if isOwner();
+        allow create: if isOwner();
+        allow update, delete: if false;
+      }
+    }
+  }
+}
