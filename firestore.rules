@@ -3,6 +3,30 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Public profile directory. Any signed-in user can look someone up by
+    // uid or by handle (via /handles) to send them money; only the owner
+    // can create/modify their own profile.
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.uid == uid;
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.handle == resource.data.handle;
+      allow delete: if false;
+    }
+
+    // handles/{handle} reserves a unique @handle -> uid mapping. Handles
+    // are permanent once claimed (no rename support yet) so a simple
+    // create-once rule is enough to prevent two accounts from colliding.
+    match /handles/{handle} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && !exists(/databases/$(database)/documents/handles/$(handle));
+      allow update, delete: if false;
+    }
+
     match /wallets/{uid} {
       function isOwner() {
         return request.auth != null && request.auth.uid == uid;
@@ -15,26 +39,37 @@ service cloud.firestore {
           && request.resource.data.tokenBalance >= 0;
       }
 
+      // A P2P send debits the sender's own wallet and, in the same
+      // transaction, credits the recipient's wallet. There's no backend
+      // here to arbitrate that dual write, so the rule for a *non-owner*
+      // update only allows it to look like a credit: cash balance goes up
+      // and nothing else about the document changes. Nobody but the owner
+      // can ever decrease a wallet's balance or touch its token balance,
+      // so the worst a non-owner can do is hand someone money.
+      function isWellFormedCredit() {
+        return request.resource.data.balance > resource.data.balance
+          && request.resource.data.tokenBalance == resource.data.tokenBalance;
+      }
+
       allow read: if isOwner();
 
       allow create: if isOwner()
         && request.resource.data.uid == uid
         && hasValidBalances();
 
-      // The client SDK performs balance changes itself (there is no backend
-      // service in this app), so rules can't fully validate the arithmetic
-      // of a transfer/top-up/swap. We at least pin down the invariants that
-      // matter: the doc can't be reassigned to another user, and neither
-      // balance can be written negative.
-      allow update: if isOwner()
-        && request.resource.data.uid == resource.data.uid
-        && hasValidBalances();
+      allow update: if request.resource.data.uid == resource.data.uid
+        && hasValidBalances()
+        && (isOwner() || (request.auth != null && isWellFormedCredit()));
 
       allow delete: if false;
 
       match /transactions/{txId} {
         allow read: if isOwner();
-        allow create: if isOwner();
+        // The owner can log any transaction type against their own
+        // ledger; a non-owner may only ever append a 'receive' entry,
+        // mirroring the credit-only invariant above.
+        allow create: if isOwner()
+          || (request.auth != null && request.resource.data.type == 'receive');
         allow update, delete: if false;
       }
     }

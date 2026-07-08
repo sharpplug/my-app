@@ -9,7 +9,9 @@ import {
   ReactNode,
 } from "react";
 import { getAuth, onAuthStateChanged, User } from "firebase/auth";
-import { app } from "@/lib/firebase-config"; 
+import { app } from "@/lib/firebase-config";
+import { ensureUserProfile } from "@/lib/users";
+import { ensureWallet } from "@/lib/wallet";
 
 const auth = getAuth(app);
 
@@ -31,6 +33,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
+      if (user) {
+        ensureUserProfile(user).catch((err) => console.error("Failed to ensure user profile:", err));
+        ensureWallet(user.uid).catch((err) => console.error("Failed to ensure wallet:", err));
+      }
     });
 
     return () => unsubscribe();

@@ -26,10 +26,11 @@ export type Wallet = {
 
 export type WalletTransaction = {
   id: string;
-  type: "send" | "topup" | "swap";
+  type: "send" | "receive" | "topup" | "swap";
   amount: number;
   fee?: number;
   recipient?: string;
+  sender?: string;
   rail?: string;
   direction?: "cashToToken" | "tokenToCash";
   createdAt: Timestamp | null;
@@ -79,24 +80,47 @@ export function subscribeToTransactions(
   });
 }
 
-export async function sendFunds(uid: string, recipient: string, amount: number) {
+export async function sendFunds(
+  sender: { uid: string; handle: string },
+  recipient: { uid: string; handle: string },
+  amount: number
+) {
   if (amount <= 0) throw new Error("Amount must be greater than zero.");
+  if (recipient.uid === sender.uid) throw new Error("You can't send money to yourself.");
+
   const fee = amount * TRANSACTION_FEE_PERCENT;
   const total = amount + fee;
 
   await runTransaction(firestore, async (tx) => {
-    const ref = walletRef(uid);
-    const snap = await tx.get(ref);
-    const balance = snap.data()?.balance ?? 0;
-    if (total > balance) {
+    const senderRef = walletRef(sender.uid);
+    const recipientRef = walletRef(recipient.uid);
+
+    // Firestore transactions require all reads before any writes.
+    const [senderSnap, recipientSnap] = await Promise.all([tx.get(senderRef), tx.get(recipientRef)]);
+
+    const senderBalance = senderSnap.data()?.balance ?? 0;
+    if (total > senderBalance) {
       throw new Error("Insufficient funds.");
     }
-    tx.update(ref, { balance: balance - total, updatedAt: serverTimestamp() });
-    tx.set(doc(transactionsRef(uid)), {
+    if (!recipientSnap.exists()) {
+      throw new Error("Recipient wallet not found.");
+    }
+    const recipientBalance = recipientSnap.data()?.balance ?? 0;
+
+    tx.update(senderRef, { balance: senderBalance - total, updatedAt: serverTimestamp() });
+    tx.update(recipientRef, { balance: recipientBalance + amount, updatedAt: serverTimestamp() });
+
+    tx.set(doc(transactionsRef(sender.uid)), {
       type: "send",
       amount,
       fee,
-      recipient,
+      recipient: recipient.handle,
+      createdAt: serverTimestamp(),
+    });
+    tx.set(doc(transactionsRef(recipient.uid)), {
+      type: "receive",
+      amount,
+      sender: sender.handle,
       createdAt: serverTimestamp(),
     });
   });
