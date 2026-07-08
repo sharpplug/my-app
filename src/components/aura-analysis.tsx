@@ -11,6 +11,7 @@ import SkinCard from "./skin-card";
 import { getAuraAnalysis, AuraAnalysisResult } from "@/app/actions";
 import { useDynamicTheme } from "@/contexts/theme-provider";
 import { useToast } from "@/hooks/use-toast";
+import { getIdToken } from "@/lib/get-id-token";
 import Image from 'next/image';
 
 type AnalysisState = "idle" | "photo" | "text" | "analyzing" | "results";
@@ -63,7 +64,8 @@ export default function AuraAnalysis() {
     setAnalysisState("analyzing");
     startTransition(async () => {
       try {
-        const analysisResults = await getAuraAnalysis(input);
+        const idToken = await getIdToken();
+        const analysisResults = await getAuraAnalysis(idToken, input);
 
         if (analysisResults.mood.mood === "CONFIG_ERROR") {
             toast({

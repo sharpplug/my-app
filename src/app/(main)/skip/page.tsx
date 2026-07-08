@@ -39,6 +39,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { planComplexTrip } from '@/app/actions';
+import { getIdToken } from '@/lib/get-id-token';
 import { Textarea } from '@/components/ui/textarea';
 import type { PlanComplexTripOutput } from '@/app/actions';
 import imagesData from '@/app/lib/placeholder-images.json';
@@ -204,7 +205,8 @@ export default function SkipPage() {
       if (!request.trim()) return;
       startPlanning(async () => {
           try {
-              const result = await planComplexTrip({ request });
+              const idToken = await getIdToken();
+              const result = await planComplexTrip(idToken, { request });
               setItinerary(result);
               setStep('itinerary');
           } catch (error) {

@@ -8,6 +8,7 @@ import { X, Mic, Send, Bot, Sparkles, Loader2, Calendar, Utensils, Route, Bed } 
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { planMyDay as getDayPlan } from "@/app/actions";
+import { getIdToken } from "@/lib/get-id-token";
 import { ScrollArea } from "./ui/scroll-area";
 import { Badge } from "./ui/badge";
 import { Card, CardContent, CardHeader, CardTitle as CardTitleComponent } from "./ui/card";
@@ -168,7 +169,8 @@ export default function TalkToNaya({ open, onOpenChange }: { open: boolean; onOp
 
     startTransition(async () => {
         try {
-            const result = await getDayPlan({ request: currentInput });
+            const idToken = await getIdToken();
+            const result = await getDayPlan(idToken, { request: currentInput });
             const nayaMessage: Message = { id: Date.now() + 1, by: 'naya', plan: result };
             setMessages(prev => [...prev, nayaMessage]);
 

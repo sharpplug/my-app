@@ -12,7 +12,7 @@ import {
   AnalyzeSkinConditionOutput,
 } from "@/ai/flows/analyze-skin-condition";
 import {
-  generateDynamicTheme,
+  generateDynamicTheme as generateDynamicThemeFlow,
   GenerateDynamicThemeInput,
   GenerateDynamicThemeOutput,
 } from "@/ai/flows/generate-dynamic-theme";
@@ -22,71 +22,71 @@ import {
   AnalyzeNayaHealthOutput,
 } from "@/ai/flows/analyze-naya-health";
 import {
-  virtualTryOn,
+  virtualTryOn as virtualTryOnFlow,
   VirtualTryOnInput,
   VirtualTryOnOutput,
 } from "@/ai/flows/virtual-try-on";
 import {
-  generateProductDescription,
+  generateProductDescription as generateProductDescriptionFlow,
   GenerateProductDescriptionInput,
   GenerateProductDescriptionOutput,
 } from "@/ai/flows/generate-product-description";
-import { 
+import {
   generateVibeVideo,
   GenerateVibeVideoInput,
-  GenerateVibeVideoOutput 
+  GenerateVibeVideoOutput
 } from "@/ai/flows/generate-vibe-video";
-import { 
-  aiCareerCoach,
+import {
+  aiCareerCoach as aiCareerCoachFlow,
   AiCareerCoachInput,
   AiCareerCoachOutput,
 } from "@/ai/flows/ai-career-coach";
 import {
-  generateEventDescription,
+  generateEventDescription as generateEventDescriptionFlow,
   GenerateEventDescriptionInput,
   GenerateEventDescriptionOutput,
 } from "@/ai/flows/generate-event-description";
 import {
-    recommendVibes,
+    recommendVibes as recommendVibesFlow,
     RecommendVibesInput,
     RecommendVibesOutput,
 } from "@/ai/flows/recommend-vibes";
 import {
-  aiSafetyCheckIn,
+  aiSafetyCheckIn as aiSafetyCheckInFlow,
   AiSafetyCheckInInput,
   AiSafetyCheckInOutput,
 } from "@/ai/flows/ai-safety-check-in";
 import {
-    planComplexTrip,
+    planComplexTrip as planComplexTripFlow,
     PlanComplexTripInput,
     PlanComplexTripOutput,
 } from "@/ai/flows/plan-complex-trip";
 import {
-    planMyDay,
+    planMyDay as planMyDayFlow,
     PlanMyDayInput,
     PlanMyDayOutput,
 } from "@/ai/flows/plan-my-day";
-import { 
-  generateStory, 
-  GenerateStoryInput, 
-  GenerateStoryOutput 
+import {
+  generateStory,
+  GenerateStoryInput,
+  GenerateStoryOutput
 } from "@/ai/flows/generate-story";
 import {
-  planChauffeurFromCalendar,
+  planChauffeurFromCalendar as planChauffeurFromCalendarFlow,
   PlanChauffeurFromCalendarInput,
   PlanChauffeurFromCalendarOutput,
 } from "@/ai/flows/plan-chauffeur-from-calendar";
 import {
-  analyzeVibePost,
+  analyzeVibePost as analyzeVibePostFlow,
   AnalyzeVibePostInput,
   AnalyzeVibePostOutput,
 } from "@/ai/flows/analyze-vibe-post";
 import {
-  nayaCallResponse,
+  nayaCallResponse as nayaCallResponseFlow,
   NayaCallInput,
   NayaCallOutput
 } from "@/ai/flows/naya-call-response";
-
+import { requireAuth } from "@/lib/verify-auth";
 
 export type AuraAnalysisResult = {
   mood: AnalyzeUserMoodOutput;
@@ -94,14 +94,16 @@ export type AuraAnalysisResult = {
 };
 
 export async function getAuraAnalysis(
+  idToken: string,
   input: AnalyzeUserMoodInput & Partial<AnalyzeSkinConditionInput>
 ): Promise<AuraAnalysisResult> {
+  await requireAuth(idToken);
   try {
     const moodResult = await analyzeUserMood({
       photoDataUri: input.photoDataUri,
       textDescription: input.textDescription,
     });
-    
+
     let skinResult: AnalyzeSkinConditionOutput | null = null;
     if (input.photoDataUri) {
        try {
@@ -132,26 +134,82 @@ export async function getAuraAnalysis(
   }
 }
 
-export { 
-  generateDynamicTheme,
-  analyzeNayaHealth as getNayaHealth,
-  generateProductDescription,
-  generateEventDescription,
-  aiCareerCoach,
-  recommendVibes,
-  aiSafetyCheckIn,
-  planComplexTrip,
-  planMyDay,
-  virtualTryOn,
-  planChauffeurFromCalendar,
-  analyzeVibePost,
-  nayaCallResponse
-};
+export async function generateDynamicTheme(idToken: string, input: GenerateDynamicThemeInput): Promise<GenerateDynamicThemeOutput> {
+  await requireAuth(idToken);
+  return generateDynamicThemeFlow(input);
+}
 
-export { generateVibeVideo as generateVibeVideoAction };
-export { generateStory as generateStoryAction };
+export async function getNayaHealth(idToken: string, input: AnalyzeNayaHealthInput): Promise<AnalyzeNayaHealthOutput> {
+  await requireAuth(idToken);
+  return analyzeNayaHealth(input);
+}
 
-export type { 
+export async function generateProductDescription(idToken: string, input: GenerateProductDescriptionInput): Promise<GenerateProductDescriptionOutput> {
+  await requireAuth(idToken);
+  return generateProductDescriptionFlow(input);
+}
+
+export async function generateEventDescription(idToken: string, input: GenerateEventDescriptionInput): Promise<GenerateEventDescriptionOutput> {
+  await requireAuth(idToken);
+  return generateEventDescriptionFlow(input);
+}
+
+export async function aiCareerCoach(idToken: string, input: AiCareerCoachInput): Promise<AiCareerCoachOutput> {
+  await requireAuth(idToken);
+  return aiCareerCoachFlow(input);
+}
+
+export async function recommendVibes(idToken: string, input: RecommendVibesInput): Promise<RecommendVibesOutput> {
+  await requireAuth(idToken);
+  return recommendVibesFlow(input);
+}
+
+export async function aiSafetyCheckIn(idToken: string, input: AiSafetyCheckInInput): Promise<AiSafetyCheckInOutput> {
+  await requireAuth(idToken);
+  return aiSafetyCheckInFlow(input);
+}
+
+export async function planComplexTrip(idToken: string, input: PlanComplexTripInput): Promise<PlanComplexTripOutput> {
+  await requireAuth(idToken);
+  return planComplexTripFlow(input);
+}
+
+export async function planMyDay(idToken: string, input: PlanMyDayInput): Promise<PlanMyDayOutput> {
+  await requireAuth(idToken);
+  return planMyDayFlow(input);
+}
+
+export async function virtualTryOn(idToken: string, input: VirtualTryOnInput): Promise<VirtualTryOnOutput> {
+  await requireAuth(idToken);
+  return virtualTryOnFlow(input);
+}
+
+export async function planChauffeurFromCalendar(idToken: string, input: PlanChauffeurFromCalendarInput): Promise<PlanChauffeurFromCalendarOutput> {
+  await requireAuth(idToken);
+  return planChauffeurFromCalendarFlow(input);
+}
+
+export async function analyzeVibePost(idToken: string, input: AnalyzeVibePostInput): Promise<AnalyzeVibePostOutput> {
+  await requireAuth(idToken);
+  return analyzeVibePostFlow(input);
+}
+
+export async function nayaCallResponse(idToken: string, input: NayaCallInput): Promise<NayaCallOutput> {
+  await requireAuth(idToken);
+  return nayaCallResponseFlow(input);
+}
+
+export async function generateVibeVideoAction(idToken: string, input: GenerateVibeVideoInput): Promise<GenerateVibeVideoOutput> {
+  await requireAuth(idToken);
+  return generateVibeVideo(input);
+}
+
+export async function generateStoryAction(idToken: string, input: GenerateStoryInput): Promise<GenerateStoryOutput> {
+  await requireAuth(idToken);
+  return generateStory(input);
+}
+
+export type {
   GenerateDynamicThemeInput, GenerateDynamicThemeOutput,
   AnalyzeNayaHealthInput, AnalyzeNayaHealthOutput,
   GenerateProductDescriptionInput, GenerateProductDescriptionOutput,

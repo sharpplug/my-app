@@ -87,7 +87,7 @@ const GoogleIcon = (props: React.SVGProps<SVGSVGElement>) => (
 
 
 export default function LoginPage() {
-    const { t, isMounted } = useLanguage();
+    const { t, isMounted, language, setLanguage } = useLanguage();
     const [activeTab, setActiveTab] = useState("login");
     const [isPending, startTransition] = useTransition();
     const [showPassword, setShowPassword] = useState(false);
@@ -362,7 +362,6 @@ export default function LoginPage() {
                 </Button>
                  <div className="absolute top-4 right-4">
                     <Button variant="ghost" size="icon" onClick={() => {
-                        const { language, setLanguage } = useLanguage();
                         setLanguage(language === 'en' ? 'ar' : 'en');
                     }}>
                         <Languages />

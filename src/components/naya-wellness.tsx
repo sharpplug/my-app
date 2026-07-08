@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Loader2, Sparkles, Heart, Utensils, Home, Bot, User, Send, Calendar, CheckCircle2, Camera, Paperclip, X } from "lucide-react";
 import { getNayaHealth } from "@/app/actions";
 import { useToast } from "@/hooks/use-toast";
+import { getIdToken } from "@/lib/get-id-token";
 import type { AnalyzeNayaHealthOutput } from "@/ai/flows/analyze-naya-health";
 import {
   Accordion,
@@ -194,7 +195,8 @@ export default function NayaWellness() {
 
     startTransition(async () => {
       try {
-        const analysisResult = await getNayaHealth({ gender, lifeStage, concerns: input, photoDataUri: photoUri || undefined });
+        const idToken = await getIdToken();
+        const analysisResult = await getNayaHealth(idToken, { gender, lifeStage, concerns: input, photoDataUri: photoUri || undefined });
         const nayaMessage: Message = { type: 'naya', content: analysisResult };
         setMessages(prev => [...prev, nayaMessage]);
       } catch (error) {

@@ -7,6 +7,7 @@ import { Mic, MicOff, Video, VideoOff, PhoneOff, Loader2, Sparkles, Volume2, Wav
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { nayaCallResponse } from '@/app/actions';
+import { getIdToken } from '@/lib/get-id-token';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import Image from 'next/image';
 
@@ -77,7 +78,8 @@ export default function AppCall({ open, onOpenChange, target }: AppCallProps) {
     startTransition(async () => {
       setIsThinking(true);
       try {
-        const response = await nayaCallResponse({ userMessage: text });
+        const idToken = await getIdToken();
+        const response = await nayaCallResponse(idToken, { userMessage: text });
         setLastAiText(response.textResponse);
         if (audioRef.current) {
           audioRef.current.src = response.audioDataUri;
@@ -91,16 +93,43 @@ export default function AppCall({ open, onOpenChange, target }: AppCallProps) {
     });
   };
 
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+
   const handleInteraction = () => {
-    if (status !== 'connected') return;
-    if (target?.type === 'ai') {
-      setIsRecording(true);
-      setTimeout(() => {
-        setIsRecording(false);
-        handleAiSpeak("I'm checking out the demo! What do you think?");
-      }, 2000);
+    if (status !== 'connected' || target?.type !== 'ai') return;
+
+    const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionImpl) {
+      toast({
+        variant: 'destructive',
+        title: "Voice Input Unsupported",
+        description: "Your browser doesn't support speech recognition. Try Chrome or Edge.",
+      });
+      return;
     }
+
+    const recognition: SpeechRecognition = new SpeechRecognitionImpl();
+    recognitionRef.current = recognition;
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = event.results[0]?.[0]?.transcript;
+      if (transcript) handleAiSpeak(transcript);
+    };
+    recognition.onerror = () => {
+      toast({ variant: 'destructive', title: "Didn't catch that", description: "Please try speaking again." });
+    };
+    recognition.onend = () => setIsRecording(false);
+
+    recognition.start();
   };
+
+  useEffect(() => {
+    return () => recognitionRef.current?.abort();
+  }, []);
 
   if (!target) return null;
 

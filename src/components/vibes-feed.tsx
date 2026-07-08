@@ -13,6 +13,7 @@ import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { generateVibeVideoAction, recommendVibes, generateStoryAction, analyzeVibePost, AnalyzeVibePostOutput } from "@/app/actions";
+import { getIdToken } from "@/lib/get-id-token";
 import CameraView from "./camera-view";
 import { Badge } from "./ui/badge";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "./ui/card";
@@ -231,7 +232,8 @@ const AiAnalysisDialog = ({ post, open, onOpenChange }: { post: any; open: boole
         if (open && post && !analysis) {
             startTransition(async () => {
                 try {
-                    const res = await analyzeVibePost({ postText: post.text || post.title, mediaHint: post.hint });
+                    const idToken = await getIdToken();
+                    const res = await analyzeVibePost(idToken, { postText: post.text || post.title, mediaHint: post.hint });
                     setAnalysis(res);
                 } catch (e) { onOpenChange(false); }
             });
@@ -276,7 +278,8 @@ export const CreateVibeDialog = ({ open, onOpenChange, onPost }: { open: boolean
         setIsVibifying(true);
         try {
             const photo = media.find(m => m.type === 'photo')?.uri;
-            const res = await generateVibeVideoAction({ textPrompt: text, photoDataUri: photo });
+            const idToken = await getIdToken();
+            const res = await generateVibeVideoAction(idToken, { textPrompt: text, photoDataUri: photo });
             setMedia(prev => [...prev, { uri: res.videoDataUri, type: 'video' }]);
             toast({ title: "✨ Vibified!", description: "AI video generated successfully." });
         } catch (e) { toast({ variant: "destructive", title: "Vibify Offline" }); }

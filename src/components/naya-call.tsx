@@ -7,6 +7,7 @@ import { Mic, MicOff, Video, VideoOff, PhoneOff, Loader2, Sparkles, Volume2, Wav
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { nayaCallResponse } from '@/app/actions';
+import { getIdToken } from '@/lib/get-id-token';
 
 interface NayaCallProps {
   open: boolean;
@@ -84,7 +85,8 @@ export default function NayaCall({ open, onOpenChange }: NayaCallProps) {
       setIsNayaThinking(true);
       try {
         const frame = captureFrame();
-        const response = await nayaCallResponse({
+        const idToken = await getIdToken();
+        const response = await nayaCallResponse(idToken, {
           photoDataUri: isVideoOff ? undefined : frame,
           userMessage: text,
         });
