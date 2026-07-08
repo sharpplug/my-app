@@ -73,13 +73,29 @@ export default function AppCall({ open, onOpenChange, target }: AppCallProps) {
     }
   };
 
+  const captureFrame = () => {
+    if (videoRef.current && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx && video.videoWidth) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/jpeg', 0.6);
+      }
+    }
+    return undefined;
+  };
+
   const handleAiSpeak = (text: string) => {
     if (isPending || !target || target.type !== 'ai') return;
     startTransition(async () => {
       setIsThinking(true);
       try {
         const idToken = await getIdToken();
-        const response = await nayaCallResponse(idToken, { userMessage: text });
+        const frame = isVideoOff ? undefined : captureFrame();
+        const response = await nayaCallResponse(idToken, { userMessage: text, photoDataUri: frame });
         setLastAiText(response.textResponse);
         if (audioRef.current) {
           audioRef.current.src = response.audioDataUri;
@@ -221,6 +237,7 @@ export default function AppCall({ open, onOpenChange, target }: AppCallProps) {
           </div>
         </div>
         <audio ref={audioRef} className="hidden" />
+        <canvas ref={canvasRef} className="hidden" />
       </DialogContent>
     </Dialog>
   );

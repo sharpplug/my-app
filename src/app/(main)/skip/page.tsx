@@ -32,7 +32,6 @@ import {
     Sparkles,
     Search
 } from "lucide-react";
-import Image from "next/image";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -42,10 +41,25 @@ import { planComplexTrip } from '@/app/actions';
 import { getIdToken } from '@/lib/get-id-token';
 import { Textarea } from '@/components/ui/textarea';
 import type { PlanComplexTripOutput } from '@/app/actions';
-import imagesData from '@/app/lib/placeholder-images.json';
 import { Badge } from '@/components/ui/badge';
 import { useRegional } from '@/contexts/language-provider';
 import AppCall, { CallTarget } from '@/components/app-call';
+import { useAuth } from '@/contexts/auth-provider';
+import { spendFunds } from '@/lib/wallet';
+import dynamic from 'next/dynamic';
+import { Skeleton } from '@/components/ui/skeleton';
+
+const StaticMap = dynamic(() => import('@/components/static-map'), {
+  ssr: false,
+  loading: () => <Skeleton className="w-full h-full bg-muted" />,
+});
+
+const REGION_CENTERS: Record<string, { lat: number; lng: number }> = {
+  AE: { lat: 25.2048, lng: 55.2708 },
+  KE: { lat: -1.2921, lng: 36.8219 },
+  UG: { lat: 0.3476, lng: 32.5825 },
+  ZA: { lat: -26.2041, lng: 28.0473 },
+};
 
 type RideStep = 'initial' | 'vehicles' | 'searching' | 'confirmed' | 'tracking' | 'itinerary' | 'payment';
 type RideType = 'personal' | 'courier';
@@ -147,7 +161,7 @@ const VehicleSelectionStep = ({ rideOptions, onSelectRide, onBack, currency }: {
     </div>
 );
 
-const PaymentStep = ({ ride, onConfirm, onBack, currency, region }: { ride: RideOption, onConfirm: () => void, onBack: () => void, currency: any, region: string }) => (
+const PaymentStep = ({ ride, onConfirm, onBack, currency, region, isPaying }: { ride: RideOption, onConfirm: () => void, onBack: () => void, currency: any, region: string, isPaying: boolean }) => (
     <div className="space-y-6">
         <div className="text-center space-y-2">
             <h3 className="text-xl font-bold font-headline">Trip Overview</h3>
@@ -159,20 +173,21 @@ const PaymentStep = ({ ride, onConfirm, onBack, currency, region }: { ride: Ride
             <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-1">Select Payment Rail</p>
             <div className="grid gap-2">
                 {(region === 'KE' || region === 'UG') && (
-                    <Button variant="outline" className="h-14 rounded-2xl justify-between px-4 border-green-500/20 bg-green-500/5 hover:bg-green-500/10" onClick={onConfirm}>
+                    <Button variant="outline" className="h-14 rounded-2xl justify-between px-4 border-green-500/20 bg-green-500/5 hover:bg-green-500/10" disabled>
                         <div className="flex items-center gap-3">
                             <Smartphone className="text-green-600" />
                             <span className="font-bold">{region === 'KE' ? 'M-Pesa Express' : 'MTN Mobile Money'}</span>
                         </div>
-                        <Badge className="bg-green-600">Fast Pay</Badge>
+                        <Badge variant="secondary">Coming Soon</Badge>
                     </Button>
                 )}
-                <Button variant="outline" className="h-14 rounded-2xl justify-start px-4 gap-3" onClick={onConfirm}>
+                <Button variant="outline" className="h-14 rounded-2xl justify-start px-4 gap-3" disabled>
                     <CreditCard className="text-blue-500" />
                     <span className="font-bold">Global Credit Card</span>
+                    <Badge variant="secondary" className="ml-auto">Coming Soon</Badge>
                 </Button>
-                <Button variant="outline" className="h-14 rounded-2xl justify-start px-4 gap-3" onClick={onConfirm}>
-                    <Zap className="text-amber-500" />
+                <Button variant="outline" className="h-14 rounded-2xl justify-start px-4 gap-3 border-primary/30 bg-primary/5" onClick={onConfirm} disabled={isPaying}>
+                    {isPaying ? <Loader2 className="animate-spin text-amber-500" /> : <Zap className="text-amber-500" />}
                     <span className="font-bold">Wallet Balance</span>
                 </Button>
             </div>
@@ -180,10 +195,10 @@ const PaymentStep = ({ ride, onConfirm, onBack, currency, region }: { ride: Ride
 
         <div className="p-4 bg-muted/50 rounded-2xl text-[10px] text-muted-foreground flex gap-2">
             <ShieldCheck className="w-4 h-4 text-primary shrink-0" />
-            <p>Your transaction is secured by regional multi-factor encryption. Moood uses local infrastructure for instant settlement.</p>
+            <p>Paid instantly from your Moood wallet balance.</p>
         </div>
 
-        <Button variant="ghost" className="w-full font-bold" onClick={onBack}>Change Vehicle</Button>
+        <Button variant="ghost" className="w-full font-bold" onClick={onBack} disabled={isPaying}>Change Vehicle</Button>
     </div>
 );
 
@@ -195,10 +210,11 @@ export default function SkipPage() {
   const [selectedRide, setSelectedRide] = useState<RideOption | null>(null);
   const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
   const [isPlanning, startPlanning] = useTransition();
+  const [isPaying, setIsPaying] = useState(false);
   const { toast } = useToast();
   const { currency, region } = useRegional();
+  const { user } = useAuth();
 
-  const mapPlaceholder = imagesData.images.find(img => img.id === 'map-view');
   const rideOptions = activeTab === 'personal' ? personalRideOptions : courierRideOptions;
 
   const handlePlanTrip = (request: string) => {
@@ -220,9 +236,18 @@ export default function SkipPage() {
       setStep('payment');
   }
 
-  const handlePaymentConfirm = () => {
-      setStep('searching');
-      setTimeout(() => setStep('confirmed'), 2500);
+  const handlePaymentConfirm = async () => {
+      if (!user || !selectedRide) return;
+      setIsPaying(true);
+      try {
+          await spendFunds(user.uid, `${selectedRide.name} ride`, selectedRide.price);
+          setStep('searching');
+          setTimeout(() => setStep('confirmed'), 2500);
+      } catch (err) {
+          toast({ variant: 'destructive', title: "Payment Failed", description: err instanceof Error ? err.message : "Please try again." });
+      } finally {
+          setIsPaying(false);
+      }
   }
 
   const sheetTitle = useMemo(() => {
@@ -242,19 +267,13 @@ export default function SkipPage() {
   return (
     <div className="w-full h-screen flex flex-col relative overflow-hidden bg-background">
         {/* Map Background */}
-        <div className="absolute inset-0 w-full h-full opacity-90 mix-blend-multiply grayscale brightness-75 contrast-125 pointer-events-none z-0">
-            {mapPlaceholder ? (
-                <Image 
-                    src={mapPlaceholder.url} 
-                    alt="Map" 
-                    fill 
-                    className="object-cover" 
-                    priority
-                    sizes="100vw"
-                />
-            ) : (
-                <div className="w-full h-full bg-muted" />
-            )}
+        <div className="absolute inset-0 w-full h-full opacity-90 grayscale brightness-75 contrast-125 z-0">
+            <StaticMap
+                lat={REGION_CENTERS[region]?.lat ?? REGION_CENTERS.AE.lat}
+                lng={REGION_CENTERS[region]?.lng ?? REGION_CENTERS.AE.lng}
+                zoom={13}
+                interactive={step === 'initial'}
+            />
         </div>
 
         {/* Top Control Overlay */}
@@ -301,7 +320,7 @@ export default function SkipPage() {
                   ) : step === 'vehicles' ? (
                       <VehicleSelectionStep rideOptions={rideOptions} onSelectRide={handleRideSelect} onBack={() => setStep('initial')} currency={currency} />
                   ) : step === 'payment' && selectedRide ? (
-                      <PaymentStep ride={selectedRide} onConfirm={handlePaymentConfirm} onBack={() => setStep('vehicles')} currency={currency} region={region} />
+                      <PaymentStep ride={selectedRide} onConfirm={handlePaymentConfirm} onBack={() => setStep('vehicles')} currency={currency} region={region} isPaying={isPaying} />
                   ) : step === 'searching' ? (
                       <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
                           <div className="relative h-24 w-24">

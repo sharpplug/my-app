@@ -31,7 +31,7 @@ import {
     type VibePost,
     type VibeComment,
 } from "@/lib/vibes";
-import { sendGift } from "@/lib/wallet";
+import { sendGift, spendFunds } from "@/lib/wallet";
 import { Timestamp } from "firebase/firestore";
 
 const PanoramaView = lazy(() => import('./panorama-view'));
@@ -65,7 +65,23 @@ const LiveStreamViewer = ({ post, open, onOpenChange, myProfile }: { post: VibeP
     const [comments, setComments] = useState<VibeComment[]>([]);
     const [newComment, setNewComment] = useState('');
     const [isGiftMenuOpen, setIsGiftMenuOpen] = useState(false);
+    const [isBuying, setIsBuying] = useState(false);
     const { toast } = useToast();
+
+    const handleBuyNow = async () => {
+        if (!post?.product || !myProfile) return;
+        const amount = parseFloat(post.product.price.replace(/[^0-9.]/g, ''));
+        if (!amount) return;
+        setIsBuying(true);
+        try {
+            await spendFunds(myProfile.uid, post.product.name, amount);
+            toast({ title: "Purchased!", description: `${post.product.name} bought from @${post.authorHandle}'s live stream.` });
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Purchase Failed", description: err instanceof Error ? err.message : "Please try again." });
+        } finally {
+            setIsBuying(false);
+        }
+    };
 
     useEffect(() => {
         if (!post || !open) return;
@@ -128,7 +144,9 @@ const LiveStreamViewer = ({ post, open, onOpenChange, myProfile }: { post: VibeP
                             </div>
                             <p className="text-[10px] font-bold text-primary truncate uppercase">{post.product.name}</p>
                             <p className="text-xs font-bold text-green-400">{post.product.price}</p>
-                            <Button size="sm" className="w-full h-7 text-[10px] mt-1">Buy Now</Button>
+                            <Button size="sm" className="w-full h-7 text-[10px] mt-1" onClick={handleBuyNow} disabled={isBuying}>
+                                {isBuying ? <Loader2 className="w-3 h-3 animate-spin" /> : "Buy Now"}
+                            </Button>
                         </div>
                     )}
 

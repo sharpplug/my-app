@@ -329,7 +329,7 @@ export default function LoginPage() {
                                                 </FormControl>
                                                 <div className="space-y-1 leading-none">
                                                     <FormLabel>
-                                                        {t('accept')} <Link href="#" className="underline">{t('terms')}</Link>.
+                                                        {t('accept')} <Link href="/terms" className="underline">{t('terms')}</Link>.
                                                     </FormLabel>
                                                     <p className="text-sm text-muted-foreground">
                                                         {t('termsDisclaimer')}

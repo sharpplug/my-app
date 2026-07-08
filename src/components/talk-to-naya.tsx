@@ -2,9 +2,10 @@
 "use client";
 
 import React, { useState, useTransition, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { X, Mic, Send, Bot, Sparkles, Loader2, Calendar, Utensils, Route, Bed } from "lucide-react";
+import { X, Mic, Send, Sparkles, Loader2, Calendar, Utensils, Route, Bed, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { planMyDay as getDayPlan } from "@/app/actions";
@@ -17,8 +18,8 @@ import type { PlanMyDayOutput } from "@/app/actions";
 
 const WelcomeMessage = () => (
   <div className="text-center p-8 flex flex-col items-center">
-    <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-4">
-      <Bot className="w-12 h-12 text-primary" />
+    <div className="w-20 h-20 bg-primary rounded-full flex items-center justify-center mb-4">
+      <Sparkles className="w-10 h-10 text-white" />
     </div>
     <h2 className="text-2xl font-bold font-headline">Talk to Naya</h2>
     <p className="text-muted-foreground mt-2">
@@ -28,7 +29,14 @@ const WelcomeMessage = () => (
   </div>
 );
 
-const ResultDisplay = ({ result }: { result: PlanMyDayOutput }) => {
+const ResultDisplay = ({ result, onNavigate }: { result: PlanMyDayOutput; onNavigate: () => void }) => {
+    const router = useRouter();
+
+    const goTo = (path: string) => {
+        router.push(path);
+        onNavigate();
+    };
+
     return (
         <div className="space-y-6 p-4 bg-muted/50 rounded-lg">
             <div>
@@ -48,6 +56,7 @@ const ResultDisplay = ({ result }: { result: PlanMyDayOutput }) => {
                              <p className="text-muted-foreground">Check-out: {result.stayBooking.checkOut}</p>
                             <p className="font-bold text-right mt-2">{result.stayBooking.estimatedCost}</p>
                         </div>
+                        <p className="text-xs text-muted-foreground italic">Stay booking isn't bookable in-app yet - this is a suggestion only.</p>
                     </CardContent>
                 </Card>
             )}
@@ -59,10 +68,15 @@ const ResultDisplay = ({ result }: { result: PlanMyDayOutput }) => {
                     </CardHeader>
                     <CardContent className="space-y-3">
                         {result.suggestedEvents.map((event, i) => (
-                             <div key={i} className="p-3 border rounded-lg text-sm">
-                                <p className="font-bold">{event.title}</p>
-                                <p className="text-muted-foreground">{event.time} at {event.location}</p>
-                                <p className="text-xs italic mt-1">"{event.reason}"</p>
+                             <div key={i} className="p-3 border rounded-lg text-sm flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="font-bold">{event.title}</p>
+                                    <p className="text-muted-foreground">{event.time} at {event.location}</p>
+                                    <p className="text-xs italic mt-1">"{event.reason}"</p>
+                                </div>
+                                <Button size="sm" variant="outline" className="shrink-0 gap-1" onClick={() => goTo(`/events?q=${encodeURIComponent(event.title)}`)}>
+                                    View <ArrowRight className="w-3 h-3" />
+                                </Button>
                             </div>
                         ))}
                     </CardContent>
@@ -78,7 +92,9 @@ const ResultDisplay = ({ result }: { result: PlanMyDayOutput }) => {
                         {result.foodRecommendations.map((food, i) => (
                              <div key={i} className="flex justify-between items-center text-sm">
                                 <span><Badge variant="secondary">{food.meal}</Badge> {food.suggestion}</span>
-                                <Badge variant="outline">{food.venue_type}</Badge>
+                                <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => goTo(`/shop?q=${encodeURIComponent(food.suggestion)}`)}>
+                                    {food.venue_type} <ArrowRight className="w-3 h-3" />
+                                </Button>
                             </div>
                         ))}
                     </CardContent>
@@ -96,6 +112,9 @@ const ResultDisplay = ({ result }: { result: PlanMyDayOutput }) => {
                             <p className="text-sm italic">"{result.tripPlan.summary}"</p>
                          </div>
                          <p className="text-center text-lg font-bold">{result.tripPlan.estimatedFare}</p>
+                         <Button className="w-full gap-2" onClick={() => goTo('/skip')}>
+                            Book with SKIP <ArrowRight className="w-4 h-4" />
+                         </Button>
                     </CardContent>
                 </Card>
             )}
@@ -188,7 +207,7 @@ export default function TalkToNaya({ open, onOpenChange }: { open: boolean; onOp
       <DialogContent className="h-full w-full max-w-full sm:h-[90vh] sm:max-w-2xl flex flex-col p-0 gap-0">
         <DialogHeader className="p-4 flex flex-row items-center justify-between border-b">
           <DialogTitle className="text-lg font-semibold flex items-center gap-2">
-            <Bot className="text-primary"/> Plan My Day
+            <Sparkles className="text-primary"/> Plan My Day
           </DialogTitle>
           <button onClick={() => onOpenChange(false)} className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
             <X className="w-6 h-6" />
@@ -201,17 +220,23 @@ export default function TalkToNaya({ open, onOpenChange }: { open: boolean; onOp
             {messages.length === 0 ? <WelcomeMessage /> : (
                 messages.map(msg => (
                     <div key={msg.id} className={cn("flex gap-3", msg.by === 'user' ? 'justify-end' : 'justify-start')}>
-                        {msg.by === 'naya' && <Bot className="w-8 h-8 flex-shrink-0 text-primary" />}
+                        {msg.by === 'naya' && (
+                            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0">
+                                <Sparkles className="w-4 h-4 text-white" />
+                            </div>
+                        )}
                         <div className={cn("rounded-lg p-3 max-w-lg", msg.by === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted')}>
                             {msg.text && <p className="text-sm">{msg.text}</p>}
-                            {msg.plan && <ResultDisplay result={msg.plan} />}
+                            {msg.plan && <ResultDisplay result={msg.plan} onNavigate={() => onOpenChange(false)} />}
                         </div>
                     </div>
                 ))
             )}
              {isPending && (
                 <div className="flex gap-3 justify-start">
-                    <Bot className="w-8 h-8 flex-shrink-0 text-primary" />
+                    <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0">
+                        <Sparkles className="w-4 h-4 text-white" />
+                    </div>
                     <div className="rounded-lg p-3 bg-muted flex items-center">
                         <Loader2 className="w-5 h-5 animate-spin"/>
                     </div>

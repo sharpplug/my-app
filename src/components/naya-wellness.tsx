@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/accordion";
 import { Badge } from "./ui/badge";
 import { Card, CardContent } from "./ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { ScrollArea } from "./ui/scroll-area";
 import { Carousel, CarouselContent, CarouselItem } from "./ui/carousel";
 import { cn } from "@/lib/utils";
@@ -267,10 +266,9 @@ export default function NayaWellness() {
                 {messages.map((message, index) => (
                     <div key={index} className={cn('flex items-start gap-3', message.type === 'user' ? 'justify-end' : 'justify-start')}>
                        {message.type !== 'user' && (
-                           <Avatar className="border">
-                               <AvatarImage src="https://picsum.photos/seed/naya/40/40" alt="Naya" />
-                               <AvatarFallback>N</AvatarFallback>
-                           </Avatar>
+                           <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center shrink-0 border-2 border-white/20">
+                               <Sparkles className="w-4 h-4 text-white" />
+                           </div>
                        )}
                        <div className={cn('rounded-lg p-3 max-w-md', message.type === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted')}>
                           {typeof message.content === 'string' ? (
@@ -289,10 +287,9 @@ export default function NayaWellness() {
                 ))}
                 {isPending && (
                      <div className="flex items-start gap-3 justify-start">
-                         <Avatar className="border">
-                            <AvatarImage src="https://picsum.photos/seed/naya/40/40" alt="Naya" />
-                            <AvatarFallback>N</AvatarFallback>
-                         </Avatar>
+                         <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center shrink-0 border-2 border-white/20">
+                            <Sparkles className="w-4 h-4 text-white" />
+                         </div>
                         <div className="rounded-lg p-3 bg-muted flex items-center gap-2">
                             <Loader2 className="w-4 h-4 animate-spin"/>
                             <p className="text-sm text-left text-muted-foreground">Naya is thinking...</p>
