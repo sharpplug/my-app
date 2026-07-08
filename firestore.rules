@@ -27,51 +27,18 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Wallet balances are read-only from the client. Every mutation (send,
+    // top-up, swap, gift, purchase) runs through a Cloud Function using the
+    // Admin SDK, which bypasses these rules entirely - there is no path
+    // here for a client to write balance/tokenBalance to any value it
+    // likes. See functions/src/index.ts.
     match /wallets/{uid} {
-      function isOwner() {
-        return request.auth != null && request.auth.uid == uid;
-      }
-
-      function hasValidBalances() {
-        return request.resource.data.balance is number
-          && request.resource.data.balance >= 0
-          && request.resource.data.tokenBalance is number
-          && request.resource.data.tokenBalance >= 0;
-      }
-
-      // A P2P send debits the sender's own wallet and, in the same
-      // transaction, credits the recipient's wallet. There's no backend
-      // here to arbitrate that dual write, so the rule for a *non-owner*
-      // update only allows it to look like a credit: cash balance goes up
-      // and nothing else about the document changes. Nobody but the owner
-      // can ever decrease a wallet's balance or touch its token balance,
-      // so the worst a non-owner can do is hand someone money.
-      function isWellFormedCredit() {
-        return request.resource.data.balance > resource.data.balance
-          && request.resource.data.tokenBalance == resource.data.tokenBalance;
-      }
-
-      allow read: if isOwner();
-
-      allow create: if isOwner()
-        && request.resource.data.uid == uid
-        && hasValidBalances();
-
-      allow update: if request.resource.data.uid == resource.data.uid
-        && hasValidBalances()
-        && (isOwner() || (request.auth != null && isWellFormedCredit()));
-
-      allow delete: if false;
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
 
       match /transactions/{txId} {
-        allow read: if isOwner();
-        // The owner can log any transaction type against their own
-        // ledger; a non-owner may only ever append a credit-shaped entry
-        // ('receive' for P2P sends, 'gift-received' for virtual gifts),
-        // mirroring the credit-only invariant above.
-        allow create: if isOwner()
-          || (request.auth != null && request.resource.data.type in ['receive', 'gift-received']);
-        allow update, delete: if false;
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
       }
     }
 
