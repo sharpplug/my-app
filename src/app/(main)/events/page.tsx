@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, MapPin, MicVocal, Search, Ticket, Loader2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Calendar, MapPin, MicVocal, Search, Ticket, Loader2, Link2, Home } from "lucide-react";
 import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect, useMemo } from "react";
@@ -15,6 +16,7 @@ import { useAuth } from "@/contexts/auth-provider";
 import { spendFunds } from "@/lib/wallet";
 import dynamic from "next/dynamic";
 import { Skeleton } from "@/components/ui/skeleton";
+import StaysMarketplace from "@/components/stays-marketplace";
 
 const StaticMap = dynamic(() => import("@/components/static-map"), {
   ssr: false,
@@ -221,11 +223,12 @@ const EventCard = ({ event, onBook }: { event: MoodEvent; onBook: (event: MoodEv
 };
 
 
-export default function EventsPage() {
+export default function LinksPage() {
     const searchParams = useSearchParams();
     const querySearch = searchParams.get('q') || "";
     const [searchTerm, setSearchTerm] = useState(querySearch);
     const [bookingEvent, setBookingEvent] = useState<MoodEvent | null>(null);
+    const [activeTab, setActiveTab] = useState<"events" | "stays">("events");
 
     useEffect(() => {
         setSearchTerm(querySearch);
@@ -241,12 +244,12 @@ export default function EventsPage() {
         <div className="w-full p-4 md:p-6 lg:p-8">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
                 <h1 className="text-3xl font-headline font-bold flex items-center gap-3">
-                    <Ticket className="w-8 h-8" /> Events
+                    <Link2 className="w-8 h-8" /> Links
                 </h1>
                 <div className="relative md:w-64">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                     <Input
-                        placeholder="Search events..."
+                        placeholder={activeTab === 'events' ? "Search events..." : "Search stays..."}
                         className="pl-10"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
@@ -254,18 +257,31 @@ export default function EventsPage() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredEvents.map(event => (
-                    <EventCard key={event.id} event={event} onBook={setBookingEvent} />
-                ))}
-            </div>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "events" | "stays")} className="w-full">
+                <TabsList className="grid w-full max-w-xs grid-cols-2 mb-6">
+                    <TabsTrigger value="events" className="gap-2"><Ticket className="w-4 h-4" /> Events</TabsTrigger>
+                    <TabsTrigger value="stays" className="gap-2"><Home className="w-4 h-4" /> Stays</TabsTrigger>
+                </TabsList>
 
-             {filteredEvents.length === 0 && (
-                <div className="text-center py-24 text-muted-foreground col-span-full">
-                    <p className="text-lg">No events found for "{searchTerm}".</p>
-                    <p>Try searching for something else!</p>
-                </div>
-            )}
+                <TabsContent value="events" className="mt-0">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filteredEvents.map(event => (
+                            <EventCard key={event.id} event={event} onBook={setBookingEvent} />
+                        ))}
+                    </div>
+
+                    {filteredEvents.length === 0 && (
+                        <div className="text-center py-24 text-muted-foreground col-span-full">
+                            <p className="text-lg">No events found for "{searchTerm}".</p>
+                            <p>Try searching for something else!</p>
+                        </div>
+                    )}
+                </TabsContent>
+
+                <TabsContent value="stays" className="mt-0">
+                    <StaysMarketplace searchTerm={searchTerm} />
+                </TabsContent>
+            </Tabs>
 
             <BookingDialog event={bookingEvent} open={!!bookingEvent} onOpenChange={(open) => !open && setBookingEvent(null)} />
         </div>

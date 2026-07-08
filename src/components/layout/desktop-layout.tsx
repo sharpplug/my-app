@@ -18,7 +18,7 @@ import { subscribeToUserProfile, type UserProfile } from "@/lib/users";
 const navItems = [
     { href: "/vibes", label: "Vibes", icon: Waves },
     { href: "/shop", label: "Shop", icon: ShoppingBag },
-    { href: "/events", label: "Events", icon: Ticket },
+    { href: "/events", label: "Links", icon: Ticket },
     { href: "/skip", label: "SKIP", icon: Car },
     { href: "/account", label: "Account", icon: User },
 ];
