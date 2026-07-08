@@ -5,7 +5,7 @@ import { useState, useTransition, useEffect, useRef } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Sparkles, Heart, Utensils, Home, Bot, User, Send, Calendar, CheckCircle2, Camera, Paperclip, X } from "lucide-react";
+import { Loader2, Sparkles, Heart, Utensils, Home, Bot, User, Send, Calendar, CheckCircle2, Camera, Paperclip, X, ShieldAlert, AlertTriangle } from "lucide-react";
 import { getNayaHealth } from "@/app/actions";
 import { useToast } from "@/hooks/use-toast";
 import { getIdToken } from "@/lib/get-id-token";
@@ -80,6 +80,14 @@ const ResultDisplay = ({ result }: { result: NayaResult }) => {
 
     return (
         <div className="space-y-6 text-left">
+            {result.requiresUrgentReferral && (
+                <div className="flex gap-3 p-4 rounded-lg bg-destructive/10 border border-destructive/30">
+                    <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+                    <p className="text-sm font-medium text-destructive-foreground/90 leading-relaxed">
+                        This sounds like something to get checked in person soon - please contact a doctor, midwife, or your nearest clinic rather than relying on home remedies for this.
+                    </p>
+                </div>
+            )}
             <div className="p-4 bg-primary/10 rounded-lg border border-primary/20">
                 <p className="text-foreground/80 leading-relaxed">{result.advice}</p>
             </div>
@@ -142,6 +150,13 @@ const ResultDisplay = ({ result }: { result: NayaResult }) => {
                 </AccordionItem>
               </Accordion>
             )}
+
+            <div className="flex gap-3 p-4 rounded-lg bg-muted/50 border">
+              <ShieldAlert className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {result.disclaimer || "This is AI-generated wellness guidance, not a medical diagnosis or treatment plan. Please consult a doctor or midwife for anything persistent or serious."}
+              </p>
+            </div>
         </div>
     );
 };
@@ -238,8 +253,12 @@ export default function NayaWellness() {
     <>
     <div className="text-center">
       <h2 className="text-2xl font-headline font-semibold mb-2">Naya Wellness Coach</h2>
-      <p className="text-muted-foreground mb-6">
+      <p className="text-muted-foreground mb-2">
         Chat with Naya about your health and wellness concerns.
+      </p>
+      <p className="text-xs text-muted-foreground mb-6 max-w-md mx-auto flex items-center justify-center gap-1.5">
+        <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+        Naya offers AI wellness guidance, not medical diagnosis or treatment - always consult a doctor or midwife for serious or persistent concerns.
       </p>
       <Card className="w-full max-w-2xl mx-auto">
         <CardContent className="p-0">

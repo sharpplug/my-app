@@ -134,8 +134,11 @@ export default function AuraAnalysis() {
   return (
     <div className="text-center">
       <h2 className="text-2xl font-headline font-semibold mb-2">Aura Analysis</h2>
-      <p className="text-muted-foreground mb-6">
+      <p className="text-muted-foreground mb-2">
         How are you feeling today? Let our AI analyze your mood and skin.
+      </p>
+      <p className="text-xs text-muted-foreground mb-6">
+        Cosmetic and wellness insight only - not a medical diagnosis.
       </p>
 
       {analysisState === "idle" && (

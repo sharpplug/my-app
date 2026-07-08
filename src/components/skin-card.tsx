@@ -4,7 +4,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { AnalyzeSkinConditionOutput } from "@/ai/flows/analyze-skin-condition";
-import { Droplets, Sparkles, Heart, Repeat, Utensils, Info } from "lucide-react";
+import { Droplets, Sparkles, Heart, Repeat, Utensils, Info, ShieldAlert } from "lucide-react";
 import { Separator } from "./ui/separator";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
@@ -48,6 +48,7 @@ export default function SkinCard({ skinResult }: SkinCardProps) {
     professionalTreatments,
     dailyRoutine,
     skinFriendlyFoods,
+    disclaimer,
   } = skinResult;
 
   return (
@@ -63,10 +64,10 @@ export default function SkinCard({ skinResult }: SkinCardProps) {
       </CardHeader>
       <CardContent className="space-y-6">
         <div>
-            <h3 className="font-semibold mb-3 text-lg">Key Concerns</h3>
+            <h3 className="font-semibold mb-3 text-lg">What We Noticed</h3>
             <div className="flex flex-wrap gap-2">
             {keyConcerns.map((concern, i) => (
-                <Badge key={i} variant="outline" className="text-destructive-foreground bg-destructive/80 border-destructive">
+                <Badge key={i} variant="secondary">
                 {concern}
                 </Badge>
             ))}
@@ -101,6 +102,13 @@ export default function SkinCard({ skinResult }: SkinCardProps) {
                     <p className="text-sm text-muted-foreground bg-secondary px-3 py-2 rounded-md">{dailyRoutine}</p>
                 </div>
             </div>
+        </div>
+
+        <div className="flex gap-3 p-4 rounded-lg bg-muted/50 border">
+          <ShieldAlert className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {disclaimer || "This is AI-generated cosmetic guidance, not a medical diagnosis. See a dermatologist for anything persistent, painful, or concerning."}
+          </p>
         </div>
       </CardContent>
     </Card>

@@ -159,6 +159,7 @@ export default function NayaCall({ open, onOpenChange }: NayaCallProps) {
               <div className="flex items-center gap-1.5 text-xs text-green-400">
                 <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
                 Live
+                <span className="text-white/40">· AI wellness assistant, not a doctor</span>
               </div>
             </div>
           </div>
