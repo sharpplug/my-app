@@ -26,15 +26,20 @@ export type Wallet = {
 
 export type WalletTransaction = {
   id: string;
-  type: "send" | "receive" | "topup" | "swap";
+  type: "send" | "receive" | "topup" | "swap" | "gift-sent" | "gift-received" | "purchase";
   amount: number;
   fee?: number;
   recipient?: string;
   sender?: string;
   rail?: string;
   direction?: "cashToToken" | "tokenToCash";
+  giftName?: string;
+  item?: string;
   createdAt: Timestamp | null;
 };
+
+/** Platform's cut of a virtual gift; the rest goes straight to the streamer. */
+export const GIFT_PLATFORM_FEE_PERCENT = 0.2;
 
 const walletRef = (uid: string) => doc(firestore, "wallets", uid);
 const transactionsRef = (uid: string) =>
@@ -121,6 +126,72 @@ export async function sendFunds(
       type: "receive",
       amount,
       sender: sender.handle,
+      createdAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function sendGift(
+  viewer: { uid: string; handle: string },
+  streamer: { uid: string; handle: string },
+  giftName: string,
+  price: number
+) {
+  if (price <= 0) throw new Error("Invalid gift.");
+  if (streamer.uid === viewer.uid) throw new Error("You can't gift yourself.");
+
+  const streamerShare = price * (1 - GIFT_PLATFORM_FEE_PERCENT);
+
+  await runTransaction(firestore, async (tx) => {
+    const viewerRef = walletRef(viewer.uid);
+    const streamerRef = walletRef(streamer.uid);
+
+    const [viewerSnap, streamerSnap] = await Promise.all([tx.get(viewerRef), tx.get(streamerRef)]);
+
+    const viewerBalance = viewerSnap.data()?.balance ?? 0;
+    if (price > viewerBalance) {
+      throw new Error("Insufficient funds.");
+    }
+    if (!streamerSnap.exists()) {
+      throw new Error("Streamer wallet not found.");
+    }
+    const streamerBalance = streamerSnap.data()?.balance ?? 0;
+
+    tx.update(viewerRef, { balance: viewerBalance - price, updatedAt: serverTimestamp() });
+    tx.update(streamerRef, { balance: streamerBalance + streamerShare, updatedAt: serverTimestamp() });
+
+    tx.set(doc(transactionsRef(viewer.uid)), {
+      type: "gift-sent",
+      amount: price,
+      giftName,
+      recipient: streamer.handle,
+      createdAt: serverTimestamp(),
+    });
+    tx.set(doc(transactionsRef(streamer.uid)), {
+      type: "gift-received",
+      amount: streamerShare,
+      giftName,
+      sender: viewer.handle,
+      createdAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function spendFunds(uid: string, item: string, amount: number) {
+  if (amount <= 0) throw new Error("Amount must be greater than zero.");
+
+  await runTransaction(firestore, async (tx) => {
+    const ref = walletRef(uid);
+    const snap = await tx.get(ref);
+    const balance = snap.data()?.balance ?? 0;
+    if (amount > balance) {
+      throw new Error("Insufficient funds.");
+    }
+    tx.update(ref, { balance: balance - amount, updatedAt: serverTimestamp() });
+    tx.set(doc(transactionsRef(uid)), {
+      type: "purchase",
+      amount,
+      item,
       createdAt: serverTimestamp(),
     });
   });

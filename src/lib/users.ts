@@ -2,7 +2,9 @@ import {
   doc,
   getDoc,
   setDoc,
+  updateDoc,
   runTransaction,
+  onSnapshot,
   collection,
   query,
   where,
@@ -13,11 +15,14 @@ import {
 import type { User } from "firebase/auth";
 import { firestore } from "@/lib/firebase-config";
 
+export type UserRole = "user" | "partner";
+
 export type UserProfile = {
   uid: string;
   handle: string;
   displayName: string;
   photoURL: string | null;
+  role: UserRole;
 };
 
 const usersRef = (uid: string) => doc(firestore, "users", uid);
@@ -68,6 +73,7 @@ export async function ensureUserProfile(user: User): Promise<void> {
           handle,
           displayName,
           photoURL: user.photoURL || null,
+          role: "user",
         });
       });
       return;
@@ -78,6 +84,23 @@ export async function ensureUserProfile(user: User): Promise<void> {
   }
 
   throw new Error("Could not reserve a unique handle after multiple attempts.");
+}
+
+export function subscribeToUserProfile(uid: string, onChange: (profile: UserProfile | null) => void) {
+  return onSnapshot(usersRef(uid), (snap) => {
+    onChange(snap.exists() ? (snap.data() as UserProfile) : null);
+  });
+}
+
+/**
+ * Self-serve upgrade to a Partner account. There's no approval workflow
+ * behind this yet (no backend to review applications), so this is a
+ * deliberate, explicit action rather than every user silently seeing
+ * partner tools by default - it closes the "everyone sees fake partner
+ * data" gap without overbuilding an approvals system nobody asked for yet.
+ */
+export async function becomePartner(uid: string): Promise<void> {
+  await updateDoc(usersRef(uid), { role: "partner" });
 }
 
 export async function findUserByHandle(rawHandle: string): Promise<UserProfile | null> {

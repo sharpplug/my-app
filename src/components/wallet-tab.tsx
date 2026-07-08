@@ -58,11 +58,14 @@ function formatTxTime(tx: WalletTransaction) {
 }
 
 function TransactionRow({ tx, currencySymbol }: { tx: WalletTransaction; currencySymbol: string }) {
-    const isCredit = tx.type === 'topup' || tx.type === 'receive' || (tx.type === 'swap' && tx.direction === 'tokenToCash');
+    const isCredit = tx.type === 'topup' || tx.type === 'receive' || tx.type === 'gift-received' || (tx.type === 'swap' && tx.direction === 'tokenToCash');
     const label =
         tx.type === 'send' ? `Sent to @${tx.recipient}` :
         tx.type === 'receive' ? `Received from @${tx.sender}` :
         tx.type === 'topup' ? `Top Up via ${tx.rail}` :
+        tx.type === 'gift-sent' ? `Sent ${tx.giftName} to @${tx.recipient}` :
+        tx.type === 'gift-received' ? `${tx.giftName} from @${tx.sender}` :
+        tx.type === 'purchase' ? `Purchased ${tx.item}` :
         tx.direction === 'cashToToken' ? 'Swapped cash for MOOOD' : 'Swapped MOOOD for cash';
 
     return (

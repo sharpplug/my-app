@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
@@ -51,6 +51,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { subscribeToUserProfile, becomePartner, type UserProfile } from "@/lib/users";
 
 const SettingsTab = () => {
     const { region, setRegion, language, setLanguage, dataSaver, setDataSaver } = useRegional();
@@ -157,11 +158,26 @@ const SettingsTab = () => {
     );
 };
 
-function ProfileContent() {
+function ProfileContent({ profile }: { profile: UserProfile | null }) {
     const { user } = useAuth();
     const router = useRouter();
+    const { toast } = useToast();
     const [bio, setBio] = useState("Exploring the vibes of the city. Digital nomad and coffee enthusiast.");
     const [isEditing, setIsEditing] = useState(false);
+    const [isUpgrading, setIsUpgrading] = useState(false);
+
+    const handleBecomePartner = async () => {
+        if (!user) return;
+        setIsUpgrading(true);
+        try {
+            await becomePartner(user.uid);
+            toast({ title: "Welcome, Partner!", description: "Partner and Academy tabs are now unlocked." });
+        } catch {
+            toast({ variant: "destructive", title: "Couldn't upgrade", description: "Please try again." });
+        } finally {
+            setIsUpgrading(false);
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -175,6 +191,7 @@ function ProfileContent() {
                         </Avatar>
                         <div className="flex-1 text-center sm:text-left pb-2">
                             <h2 className="text-2xl font-bold font-headline">{user?.displayName || 'Moood User'}</h2>
+                            {profile?.handle && <p className="text-sm text-primary font-medium">@{profile.handle}</p>}
                             <p className="text-sm text-muted-foreground flex items-center justify-center sm:justify-start gap-1"><Mail className="w-3 h-3"/> {user?.email}</p>
                         </div>
                         <Button variant="outline" size="sm" className="rounded-full gap-2 px-4" onClick={() => setIsEditing(!isEditing)}>
@@ -232,6 +249,20 @@ function ProfileContent() {
                     <p className="text-[10px] text-muted-foreground mt-3 flex items-center gap-1.5"><Smartphone className="w-3 h-3"/> Verify a phone number to unlock P2P transfers.</p>
                 </CardContent>
             </Card>
+
+            {profile && profile.role !== 'partner' && (
+                <Card className="border-primary/20 bg-primary/5 backdrop-blur-xl">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-bold flex items-center gap-2"><LayoutDashboard className="w-4 h-4 text-primary"/> Sell on Moood</CardTitle>
+                        <CardDescription className="text-xs">Unlock the Partner Dashboard and Academy to list products, go live for shopping, and grow a business on Moood.</CardDescription>
+                    </CardHeader>
+                    <CardFooter>
+                        <Button className="w-full rounded-xl h-11 font-bold" onClick={handleBecomePartner} disabled={isUpgrading}>
+                            {isUpgrading ? "Upgrading..." : "Become a Partner"}
+                        </Button>
+                    </CardFooter>
+                </Card>
+            )}
         </div>
     );
 }
@@ -386,43 +417,56 @@ const AcademyTab = () => {
 }
 
 export default function AccountPage() {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const isPartner = profile?.role === 'partner';
+
+  useEffect(() => {
+    if (!user) return;
+    return subscribeToUserProfile(user.uid, setProfile);
+  }, [user]);
+
   return (
     <div className="w-full mx-auto p-4 md:p-6 lg:p-8 max-w-2xl pb-24 animate-in fade-in duration-700">
         <div className="flex items-center justify-between mb-8">
             <h1 className="text-3xl font-headline font-bold flex items-center gap-3">
                 <User className="w-8 h-8 text-primary" /> My Account
             </h1>
-            <Badge variant="outline" className="h-6 px-3 border-primary/20 bg-primary/5 text-primary font-bold text-[10px]">PREMIUM PARTNER</Badge>
+            {isPartner && <Badge variant="outline" className="h-6 px-3 border-primary/20 bg-primary/5 text-primary font-bold text-[10px]">PARTNER</Badge>}
         </div>
 
         <Tabs defaultValue="profile" className="w-full">
-            <TabsList className="grid w-full grid-cols-5 h-auto bg-muted/50 p-1.5 rounded-2xl mb-8 backdrop-blur-xl border border-white/5">
+            <TabsList className={cn("grid w-full h-auto bg-muted/50 p-1.5 rounded-2xl mb-8 backdrop-blur-xl border border-white/5", isPartner ? "grid-cols-5" : "grid-cols-3")}>
                 <TabsTrigger value="profile" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Profile</TabsTrigger>
                 <TabsTrigger value="wallet" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Wallet</TabsTrigger>
                 <TabsTrigger value="settings" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Settings</TabsTrigger>
-                <TabsTrigger value="partner" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Partner</TabsTrigger>
-                <TabsTrigger value="academy" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Academy</TabsTrigger>
+                {isPartner && <TabsTrigger value="partner" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Partner</TabsTrigger>}
+                {isPartner && <TabsTrigger value="academy" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Academy</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="profile" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                <ProfileContent />
+                <ProfileContent profile={profile} />
             </TabsContent>
-            
+
             <TabsContent value="wallet" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
                 <WalletTab />
             </TabsContent>
-            
+
             <TabsContent value="settings" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
                 <SettingsTab />
             </TabsContent>
-            
-            <TabsContent value="partner" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                <PartnerDashboardTab />
-            </TabsContent>
-            
-            <TabsContent value="academy" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                <AcademyTab />
-            </TabsContent>
+
+            {isPartner && (
+                <TabsContent value="partner" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <PartnerDashboardTab />
+                </TabsContent>
+            )}
+
+            {isPartner && (
+                <TabsContent value="academy" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <AcademyTab />
+                </TabsContent>
+            )}
         </Tabs>
     </div>
   );
