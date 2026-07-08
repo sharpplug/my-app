@@ -1,0 +1,150 @@
+
+"use client";
+
+import React, { useState } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Waves, Sparkles, Map, List, Camera, MessageSquare } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import Image from "next/image";
+import { VibeFeed, CreateVibeDialog, initialMockPosts } from "@/components/vibes-feed";
+import { useToast } from "@/hooks/use-toast";
+import { FriendStoryCarousel, SuggestionCards } from "@/components/friends-carousel";
+import { Switch } from "@/components/ui/switch";
+import AuraNaya from "@/components/aura-naya";
+import Link from "next/link";
+
+
+const Logo = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      {...props}
+    >
+        <defs>
+            <linearGradient id="fire-header" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style={{stopColor: '#FF4848'}} />
+                <stop offset="100%" style={{stopColor: '#FACC15'}} />
+            </linearGradient>
+            <linearGradient id="water-header" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style={{stopColor: '#22D3EE'}} />
+                <stop offset="100%" style={{stopColor: '#3B82F6'}} />
+            </linearGradient>
+        </defs>
+        <circle cx="12" cy="12" r="10" fill="url(#fire-header)" />
+        <path d="M12 2a10 10 0 0 0 0 20c3.5 0 6.6-1.8 8.4-4.5a.5.5 0 0 1 .1-.5 8 8 0 0 0-15-5 .5.5 0 0 1 .2-1A10 10 0 0 1 12 2Z" fill="url(#water-header)" />
+        <path d="M5.9 12.5a.5.5 0 0 0-.2 1 8 8 0 0 1 15 5 .5.5 0 0 0-.1.5A10 10 0 0 1 4 12c0-.8.1-1.6.4-2.3a.5.5 0 0 0-.3-.9ZM18.1 11.5a.5.5 0 0 0 .2-1 8 8 0 0 1-15-5A.5.5 0 0 0 3.4 6 10 10 0 0 1 20 12c0 .8-.1-1.6-.4 2.3a.5.5 0 0 0 .3.9Z" stroke="hsl(var(--background))" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+);
+
+export default function VibeHubPage() {
+  const [activeTab, setActiveTab] = useState("vibes");
+  const [vibeView, setVibeView] = useState("feed");
+  const [isVibeCreatorOpen, setIsVibeCreatorOpen] = useState(false);
+  const [allPosts, setAllPosts] = useState<any[]>(initialMockPosts); 
+  const { toast } = useToast();
+  
+  const handlePost = (post: any) => {
+    // Add the new post to the beginning of the feed
+    setAllPosts(prev => [post, ...prev]);
+  };
+
+
+  return (
+    <>
+      <div className="w-full min-h-screen flex flex-col bg-gradient-to-br from-indigo-900 via-purple-900 to-black relative overflow-y-auto">
+        {/* 3D Background */}
+        <div 
+          className="absolute inset-0 z-0 animate-stars"
+          style={{
+            backgroundImage: `
+              radial-gradient(1px 1px at 20px 30px, #fff, transparent),
+              radial-gradient(1px 1px at 40px 70px, #fff, transparent),
+              radial-gradient(1px 1px at 80px 120px, #ddd, transparent),
+              radial-gradient(2px 2px at 160px 240px, #fff, transparent),
+              radial-gradient(1px 1px at 50px 200px, #fff, transparent),
+              radial-gradient(2px 2px at 200px 50px, #fff, transparent),
+              radial-gradient(3px 3px at 300px 300px, #ddd, transparent)
+            `,
+            backgroundRepeat: 'repeat',
+            backgroundSize: '350px 350px'
+          }}
+        />
+
+        <div className="sticky top-0 z-20 p-4 bg-gradient-to-b from-black/50 via-black/30 to-transparent backdrop-blur-sm">
+            <div className="flex items-center justify-between gap-2">
+                <Link href="/vibes" className="flex items-center gap-2">
+                  <Logo className="h-6 w-6" />
+                   <h1 className="text-xl font-body font-bold">
+                       <span className="bg-gradient-to-r from-red-500 via-yellow-500 to-blue-500 bg-clip-text text-transparent">
+                            Moood
+                       </span>
+                   </h1>
+                </Link>
+               <div className="flex items-center">
+                    <Link href="/messages" passHref>
+                        <Button variant="ghost" size="icon" className="text-white h-9 w-9 flex-shrink-0 hover:bg-white/10 hover:text-white">
+                            <MessageSquare />
+                            <span className="sr-only">Messages</span>
+                        </Button>
+                    </Link>
+                   <Button variant="ghost" size="icon" className="text-white h-9 w-9 flex-shrink-0 hover:bg-white/10 hover:text-white" onClick={() => setIsVibeCreatorOpen(true)}>
+                      <Camera />
+                  </Button>
+               </div>
+            </div>
+        </div>
+
+        <div className="w-full p-4 z-10">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="grid w-full grid-cols-2 bg-black/20 border border-white/10 text-white backdrop-blur-sm">
+                <TabsTrigger value="vibes" className="data-[state=active]:bg-white/10">
+                <Waves className="mr-2" />
+                Vibes
+                </TabsTrigger>
+                <TabsTrigger value="aura-naya" className="data-[state=active]:bg-white/10">
+                <Sparkles className="mr-2" />
+                Aura x Naya
+                </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="vibes" className="mt-4">
+                <div className="flex items-center justify-center py-4">
+                   <div className="flex items-center space-x-2 bg-black/20 p-1.5 rounded-full border border-white/10 text-white backdrop-blur-sm">
+                      <List className="w-4 h-4 ml-2" />
+                      <Switch
+                          id="view-toggle"
+                          checked={vibeView === 'map'}
+                          onCheckedChange={(checked) => setVibeView(checked ? 'map' : 'feed')}
+                          className="data-[state=checked]:bg-purple-600"
+                      />
+                      <Map className="w-4 h-4 mr-2" />
+                  </div>
+                </div>
+              
+              {vibeView === 'feed' ? (
+                  <>
+                      <FriendStoryCarousel onAddStory={() => setIsVibeCreatorOpen(true)} />
+                      <SuggestionCards />
+                      <VibeFeed posts={allPosts} setPosts={setAllPosts} />
+                  </>
+              ) : (
+                  <div className="h-[70vh] rounded-2xl overflow-hidden relative border border-white/10 bg-black/20">
+                      <Image src="https://picsum.photos/seed/mapview/800/1200" alt="Map View" fill className="object-cover opacity-50"/>
+                       <div className="absolute inset-0 flex items-center justify-center">
+                          <p className="text-white/70">Map View Placeholder</p>
+                      </div>
+                  </div>
+              )}
+
+            </TabsContent>
+            
+            <TabsContent value="aura-naya" className="mt-4">
+                <AuraNaya />
+            </TabsContent>
+          </Tabs>
+        </div>
+      </div>
+      <CreateVibeDialog open={isVibeCreatorOpen} onOpenChange={setIsVibeCreatorOpen} onPost={handlePost} />
+    </>
+  );
+}

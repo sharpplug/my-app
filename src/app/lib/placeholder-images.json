@@ -1,0 +1,61 @@
+
+{
+  "images": [
+    {
+      "id": "login-bg",
+      "url": "https://picsum.photos/seed/login/1200/1800",
+      "hint": "abstract art",
+      "width": 1200,
+      "height": 1800
+    },
+    {
+      "id": "ad-skincare",
+      "url": "https://picsum.photos/seed/ad1/1200/400",
+      "hint": "skincare flatlay",
+      "width": 1200,
+      "height": 400
+    },
+    {
+      "id": "ad-moms",
+      "url": "https://picsum.photos/seed/ad2/1200/400",
+      "hint": "mother baby",
+      "width": 1200,
+      "height": 400
+    },
+    {
+      "id": "ad-skip",
+      "url": "https://picsum.photos/seed/ad3/1200/400",
+      "hint": "city night",
+      "width": 1200,
+      "height": 400
+    },
+    {
+      "id": "ad-brunch",
+      "url": "https://picsum.photos/seed/ad-inline-1/800/200",
+      "hint": "pizza brunch",
+      "width": 800,
+      "height": 200
+    },
+    {
+      "id": "ad-yoga",
+      "url": "https://picsum.photos/seed/ad-inline-2/800/200",
+      "hint": "yoga pose",
+      "width": 800,
+      "height": 200
+    },
+    {
+      "id": "ad-groceries",
+      "url": "https://picsum.photos/seed/ad-inline-3/800/200",
+      "hint": "fresh vegetables",
+      "width": 800,
+      "height": 200
+    },
+    {
+      "id": "map-view",
+      "url": "https://picsum.photos/seed/mapview/800/1200",
+      "hint": "city map",
+      "width": 800,
+      "height": 1200
+    }
+  ]
+}
