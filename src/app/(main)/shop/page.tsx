@@ -1,42 +1,126 @@
 
 "use client";
 
-import React, { useState, useMemo, Suspense, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from "@/components/ui/card";
-import { ShoppingBag, Heart, ShieldCheck, CookingPot, Wheat, Plus, Search, PlayCircle, Loader2, Wand2, Camera, UserCheck, Stethoscope, Dumbbell, Home, Sparkles, Ticket, Calendar, MapPin, MicVocal, CreditCard, Shirt, SprayCan, Bed, Tent, Speaker, BookOpen, Phone, Smartphone } from "lucide-react";
+import { ShoppingBag, Search, Loader2, Camera, X, Phone, CreditCard, Smartphone, Wand2 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from '@/components/ui/skeleton';
-import { Carousel, CarouselContent, CarouselItem } from "@/components/ui/carousel";
-import Autoplay from "embla-carousel-autoplay";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { virtualTryOn } from '@/app/actions';
+import { getIdToken } from '@/lib/get-id-token';
 import { useToast } from '@/hooks/use-toast';
-import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { useSearchParams } from 'next/navigation';
 import AppCall, { CallTarget } from '@/components/app-call';
 import { useRegional } from '@/contexts/language-provider';
+import { useAuth } from '@/contexts/auth-provider';
+import { spendFunds } from '@/lib/wallet';
+import CameraView from '@/components/camera-view';
 
-// Mock Data remains mostly same, but price display will use regional context
-const mockServiceProviders = [
-    { name: "Serenity Spa", videoUrl: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4" },
-    { name: "M-Pesa Express Services", region: 'KE' },
-    { name: "Flow Yoga Studio" },
-    { name: "Skin & Glow Clinic" },
-];
+type MarketplaceItem = {
+    category: string;
+    title: string;
+    description: string;
+    image: string;
+    hint: string;
+    providerName: string;
+    type: 'on-site' | 'virtual' | 'product';
+    price: number;
+    tryOn?: boolean;
+};
 
-const mockServiceItems = [
+const mockServiceItems: MarketplaceItem[] = [
     { category: 'wellness', title: "Relaxing Massage", description: "60-min session", image: "https://picsum.photos/seed/massage/400/400", hint: "spa massage", providerName: "Serenity Spa", type: 'on-site', price: 250 },
     { category: 'wellness', title: "Dermatology Consultation", description: "Acne & Skin concerns", image: "https://picsum.photos/seed/derm/400/400", hint: "dermatologist online", providerName: "Skin & Glow Clinic", type: 'virtual', price: 300 },
+    { category: 'fashion', title: "Silk Wrap Dress", description: "Aisha's Boutique", image: "https://picsum.photos/seed/dress/400/400", hint: "silk dress", providerName: "Aisha's Boutique", type: 'product', price: 450, tryOn: true },
+    { category: 'fashion', title: "Aviator Sunglasses", description: "UV400, polarized", image: "https://picsum.photos/seed/sunglasses/400/400", hint: "sunglasses", providerName: "Desert Optics", type: 'product', price: 120, tryOn: true },
+    { category: 'beauty', title: "Matte Lipstick - Rosewood", description: "Long-lasting, vegan", image: "https://picsum.photos/seed/lipstick/400/400", hint: "lipstick", providerName: "Glow Cosmetics", type: 'product', price: 85, tryOn: true },
+    { category: 'home', title: "Handwoven Rug", description: "Artisan's Corner", image: "https://picsum.photos/seed/rug/400/400", hint: "handwoven rug", providerName: "Artisan's Corner", type: 'product', price: 620 },
+    { category: 'food', title: "Weekly Organic Box", description: "Farm-fresh produce", image: "https://picsum.photos/seed/veggies/400/400", hint: "organic vegetables", providerName: "Green Souk", type: 'product', price: 95 },
+    { category: 'wellness', title: "Personal Trainer Session", description: "1-on-1, 45 min", image: "https://picsum.photos/seed/trainer/400/400", hint: "gym trainer", providerName: "Flow Fitness", type: 'on-site', price: 180 },
 ];
 
-const MarketplaceItemCard = ({ item, onCall }: { item: any, onCall?: (target: CallTarget) => void }) => {
+const TryOnDialog = ({ open, onOpenChange, item }: { open: boolean; onOpenChange: (open: boolean) => void; item: MarketplaceItem | null }) => {
+    const [userPhoto, setUserPhoto] = useState<string | null>(null);
+    const [isCameraOpen, setIsCameraOpen] = useState(false);
+    const [resultUri, setResultUri] = useState<string | null>(null);
+    const [isPending, setIsPending] = useState(false);
+    const { toast } = useToast();
+
+    useEffect(() => {
+        if (!open) {
+            setUserPhoto(null);
+            setResultUri(null);
+        }
+    }, [open]);
+
+    const handleTryOn = async () => {
+        if (!userPhoto || !item) return;
+        setIsPending(true);
+        try {
+            const idToken = await getIdToken();
+            const res = await virtualTryOn(idToken, {
+                userPhotoDataUri: userPhoto,
+                productPhotoDataUri: item.image,
+                category: item.category,
+            });
+            setResultUri(res.generatedImageUri);
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Try-On Failed", description: err instanceof Error ? err.message : "Please try again." });
+        } finally {
+            setIsPending(false);
+        }
+    };
+
+    if (!item) return null;
+
+    return (
+        <>
+            <Dialog open={open} onOpenChange={onOpenChange}>
+                <DialogContent className="sm:rounded-[2rem]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2"><Wand2 className="w-5 h-5 text-primary" /> Try It On</DialogTitle>
+                        <DialogDescription>See how "{item.title}" looks on you, powered by AI.</DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4 space-y-4">
+                        {resultUri ? (
+                            <div className="relative aspect-square rounded-2xl overflow-hidden border">
+                                <Image src={resultUri} alt="Try-on result" fill className="object-cover" />
+                            </div>
+                        ) : userPhoto ? (
+                            <div className="relative aspect-square rounded-2xl overflow-hidden border">
+                                <Image src={userPhoto} alt="Your photo" fill className="object-cover" />
+                                <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-8 w-8" onClick={() => setUserPhoto(null)}><X className="w-4 h-4" /></Button>
+                            </div>
+                        ) : (
+                            <Button variant="outline" className="w-full h-32 rounded-2xl border-dashed flex-col gap-2" onClick={() => setIsCameraOpen(true)}>
+                                <Camera className="w-6 h-6" />
+                                <span className="text-sm">Take a photo of yourself</span>
+                            </Button>
+                        )}
+                    </div>
+                    {resultUri ? (
+                        <Button className="w-full h-12 rounded-xl font-bold" onClick={() => setResultUri(null)}>Try Another Photo</Button>
+                    ) : (
+                        <Button className="w-full h-12 rounded-xl font-bold" onClick={handleTryOn} disabled={!userPhoto || isPending}>
+                            {isPending ? <Loader2 className="animate-spin mr-2 w-4 h-4" /> : <Wand2 className="mr-2 w-4 h-4" />} Generate
+                        </Button>
+                    )}
+                </DialogContent>
+            </Dialog>
+            <CameraView open={isCameraOpen} onOpenChange={setIsCameraOpen} onUsePhoto={setUserPhoto} title="Take a photo for Try-On" />
+        </>
+    );
+};
+
+const MarketplaceItemCard = ({ item, onCall }: { item: MarketplaceItem, onCall?: (target: CallTarget) => void }) => {
     const { currency } = useRegional();
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-    
+    const [isTryOnOpen, setIsTryOnOpen] = useState(false);
+
     return (
         <>
             <Card className="overflow-hidden flex flex-col h-full shadow-sm hover:shadow-md transition-shadow">
@@ -52,6 +136,11 @@ const MarketplaceItemCard = ({ item, onCall }: { item: any, onCall?: (target: Ca
                     <p className="font-bold text-base text-primary">{currency.symbol} {item.price}</p>
                 </CardContent>
                 <CardFooter className="flex flex-col items-stretch gap-2 p-3 pt-0">
+                    {item.tryOn && (
+                        <Button variant="outline" size="sm" className="w-full rounded-full gap-1.5" onClick={() => setIsTryOnOpen(true)}>
+                            <Wand2 className="w-3.5 h-3.5" /> Try It On
+                        </Button>
+                    )}
                     <div className="flex gap-2">
                         <Button variant="outline" size="icon" className="shrink-0 rounded-full" onClick={() => onCall?.({ name: item.providerName, type: 'business' })}><Phone className="w-4 h-4 text-green-500" /></Button>
                         <Button size="sm" className="w-full rounded-full bg-primary" onClick={() => setIsCheckoutOpen(true)}>Get Now</Button>
@@ -59,20 +148,37 @@ const MarketplaceItemCard = ({ item, onCall }: { item: any, onCall?: (target: Ca
                 </CardFooter>
             </Card>
             <CheckoutDialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen} item={item} />
+            <TryOnDialog open={isTryOnOpen} onOpenChange={setIsTryOnOpen} item={item} />
         </>
     );
 };
 
-const CheckoutDialog = ({ open, onOpenChange, item }: { open: boolean, onOpenChange: (open: boolean) => void, item: any }) => {
+const CheckoutDialog = ({ open, onOpenChange, item }: { open: boolean, onOpenChange: (open: boolean) => void, item: MarketplaceItem }) => {
     const { currency, region } = useRegional();
     const { toast } = useToast();
+    const { user } = useAuth();
+    const [isPending, setIsPending] = useState(false);
+
+    const handlePay = async () => {
+        if (!user) return;
+        setIsPending(true);
+        try {
+            await spendFunds(user.uid, item.title, item.price);
+            toast({ title: "Order Confirmed!", description: `${currency.symbol} ${item.price} paid from your Moood wallet.` });
+            onOpenChange(false);
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Payment Failed", description: err instanceof Error ? err.message : "Please try again." });
+        } finally {
+            setIsPending(false);
+        }
+    };
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:rounded-[2rem]">
                 <DialogHeader>
                     <DialogTitle>Checkout</DialogTitle>
-                    <DialogDescription>Review and pay securely.</DialogDescription>
+                    <DialogDescription>Review and pay from your Moood wallet.</DialogDescription>
                 </DialogHeader>
                 <div className="py-4 space-y-4">
                     <div className="flex items-center gap-4 p-4 border rounded-2xl bg-muted/30">
@@ -83,23 +189,44 @@ const CheckoutDialog = ({ open, onOpenChange, item }: { open: boolean, onOpenCha
                         </div>
                     </div>
                     <div className="p-4 border rounded-2xl space-y-3">
-                        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Select Payment</p>
+                        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Paying With</p>
                         <div className="grid grid-cols-1 gap-2">
-                            {region === 'KE' && <Button variant="outline" className="justify-start h-12 rounded-xl"><Smartphone className="mr-2 text-green-600" /> M-Pesa Express</Button>}
-                            {region === 'UG' && <Button variant="outline" className="justify-start h-12 rounded-xl"><Smartphone className="mr-2 text-yellow-500" /> MTN Mobile Money</Button>}
-                            <Button variant="outline" className="justify-start h-12 rounded-xl"><CreditCard className="mr-2" /> Global Credit Card</Button>
+                            <div className="flex items-center gap-2 h-12 px-4 rounded-xl border bg-primary/5 text-sm font-bold">
+                                <CreditCard className="text-primary w-4 h-4" /> Moood Wallet Balance
+                            </div>
+                            {region === 'KE' && <Button variant="outline" className="justify-start h-12 rounded-xl" disabled><Smartphone className="mr-2 text-green-600" /> M-Pesa Express (coming soon)</Button>}
+                            {region === 'UG' && <Button variant="outline" className="justify-start h-12 rounded-xl" disabled><Smartphone className="mr-2 text-yellow-500" /> MTN Mobile Money (coming soon)</Button>}
                         </div>
                     </div>
                 </div>
-                <Button className="w-full h-14 rounded-xl text-lg font-bold" onClick={() => { toast({ title: "Order Confirmed!" }); onOpenChange(false); }}>Pay {currency.symbol} {item.price}</Button>
+                <Button className="w-full h-14 rounded-xl text-lg font-bold" onClick={handlePay} disabled={isPending}>
+                    {isPending ? <Loader2 className="animate-spin mr-2 w-4 h-4" /> : null} Pay {currency.symbol} {item.price}
+                </Button>
             </DialogContent>
         </Dialog>
     );
 };
 
 export default function ShopPage() {
+  const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
+
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (q) setSearchTerm(q);
+  }, [searchParams]);
+
+  const filteredItems = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return mockServiceItems;
+    return mockServiceItems.filter(item =>
+        item.title.toLowerCase().includes(term) ||
+        item.description.toLowerCase().includes(term) ||
+        item.category.toLowerCase().includes(term) ||
+        item.providerName.toLowerCase().includes(term)
+    );
+  }, [searchTerm]);
 
   return (
     <div className="w-full p-4 md:p-6 lg:p-8 space-y-6">
@@ -113,11 +240,15 @@ export default function ShopPage() {
             </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {mockServiceItems.map((item, i) => (
-                <MarketplaceItemCard key={i} item={item} onCall={setActiveCallTarget} />
-            ))}
-        </div>
+        {filteredItems.length === 0 ? (
+            <p className="text-center text-muted-foreground py-16">No products match "{searchTerm}".</p>
+        ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {filteredItems.map((item, i) => (
+                    <MarketplaceItemCard key={i} item={item} onCall={setActiveCallTarget} />
+                ))}
+            </div>
+        )}
 
         <AppCall open={!!activeCallTarget} onOpenChange={(o) => !o && setActiveCallTarget(null)} target={activeCallTarget} />
     </div>

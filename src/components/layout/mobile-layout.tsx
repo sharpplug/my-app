@@ -5,13 +5,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Header from "./header";
 import { cn } from "@/lib/utils";
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import TalkToNaya from "../talk-to-naya";
 import AppCall, { CallTarget } from "../app-call";
 import { CreateVibeDialog } from "../vibes-feed";
-import { useToast } from "@/hooks/use-toast";
 import { CreateMenu, HeatBroadcastMenu } from "./creation-menus";
 import LiveStreamCreator from "../live-stream-creator";
+import { useAuth } from "@/contexts/auth-provider";
+import { subscribeToUserProfile, type UserProfile } from "@/lib/users";
 
 
 const navItems = [
@@ -48,23 +49,21 @@ const MobileBottomNav = () => {
 }
 
 export default function MobileLayout({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isNayaOpen, setIsNayaOpen] = useState(false);
   const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [isVibeCreatorOpen, setIsVibeCreatorOpen] = useState(false);
   const [isHeatBroadcastOpen, setIsHeatBroadcastOpen] = useState(false);
   const [isLiveCreatorOpen, setIsLiveCreatorOpen] = useState(false);
-  const {toast} = useToast();
   const pathname = usePathname();
   const isVibesPage = pathname.startsWith('/vibes');
 
-
-  const handlePost = (post: any) => {
-    toast({
-        title: "Vibe Posted!",
-        description: "Your new vibe is live."
-    })
-  }
+  useEffect(() => {
+    if (!user) return;
+    return subscribeToUserProfile(user.uid, setProfile);
+  }, [user]);
 
   const handleCreateSelect = (option: string) => {
     if (option === 'vibe') {
@@ -110,8 +109,8 @@ export default function MobileLayout({ children }: { children: React.ReactNode }
           onOpenChange={(open) => !open && setActiveCallTarget(null)} 
           target={activeCallTarget} 
         />
-        <CreateVibeDialog open={isVibeCreatorOpen} onOpenChange={setIsVibeCreatorOpen} onPost={handlePost} />
-        <LiveStreamCreator open={isLiveCreatorOpen} onOpenChange={setIsLiveCreatorOpen} />
+        <CreateVibeDialog open={isVibeCreatorOpen} onOpenChange={setIsVibeCreatorOpen} profile={profile} />
+        <LiveStreamCreator open={isLiveCreatorOpen} onOpenChange={setIsLiveCreatorOpen} profile={profile} />
         <MobileBottomNav />
     </div>
   );

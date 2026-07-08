@@ -3,25 +3,31 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Camera, Radio, X, Loader2, Play, AlertTriangle, ShoppingBag, Users, MessageSquare } from 'lucide-react';
+import { Camera, Radio, X, Loader2, Play, AlertTriangle, ShoppingBag, Users, MessageSquare, Send } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import type { UserProfile } from '@/lib/users';
+import { createVibePost, deleteVibePost, subscribeToComments, addComment, type VibeComment } from '@/lib/vibes';
 
 interface LiveStreamCreatorProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  profile: UserProfile | null;
 }
 
-export default function LiveStreamCreator({ open, onOpenChange }: LiveStreamCreatorProps) {
+export default function LiveStreamCreator({ open, onOpenChange, profile }: LiveStreamCreatorProps) {
   const [step, setStep] = useState<'setup' | 'live'>('setup');
   const [title, setTitle] = useState('');
   const [isBusiness, setIsLiveShopping] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isStarting, setIsStarting] = useState(false);
-  
+  const [postId, setPostId] = useState<string | null>(null);
+  const [comments, setComments] = useState<VibeComment[]>([]);
+  const [chatInput, setChatInput] = useState('');
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
@@ -52,9 +58,15 @@ export default function LiveStreamCreator({ open, onOpenChange }: LiveStreamCrea
       setStep('setup');
       setTitle('');
       setIsLiveShopping(false);
+      setPostId(null);
     }
     return () => stopCamera();
   }, [open]);
+
+  useEffect(() => {
+    if (!postId) return;
+    return subscribeToComments(postId, setComments);
+  }, [postId]);
 
   const stopCamera = () => {
     if (streamRef.current) {
@@ -63,18 +75,49 @@ export default function LiveStreamCreator({ open, onOpenChange }: LiveStreamCrea
     }
   };
 
-  const handleGoLive = () => {
+  const handleGoLive = async () => {
     if (!title.trim()) {
       toast({ variant: 'destructive', title: "Title Required", description: "Give your show a name!" });
       return;
     }
+    if (!profile) {
+      toast({ variant: 'destructive', title: "Not signed in" });
+      return;
+    }
     setIsStarting(true);
-    // Simulate server connection
-    setTimeout(() => {
+    try {
+      const id = await createVibePost(profile, {
+        type: 'live',
+        text: title,
+        isShopping: isBusiness,
+        viewers: 0,
+      });
+      setPostId(id);
       setStep('live');
-      setIsStarting(false);
       toast({ title: "You are LIVE!", description: "Share your vibe with the community." });
-    }, 2000);
+    } catch (err) {
+      toast({ variant: 'destructive', title: "Couldn't go live", description: err instanceof Error ? err.message : "Please try again." });
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  const handleEndShow = async () => {
+    if (postId) {
+      await deleteVibePost(postId).catch(() => {});
+    }
+    onOpenChange(false);
+  };
+
+  const handleSendChat = async () => {
+    if (!chatInput.trim() || !postId || !profile) return;
+    const text = chatInput;
+    setChatInput('');
+    try {
+      await addComment(postId, { uid: profile.uid, handle: profile.handle }, text, 'chat');
+    } catch {
+      toast({ variant: 'destructive', title: "Couldn't send" });
+    }
   };
 
   return (
@@ -90,14 +133,14 @@ export default function LiveStreamCreator({ open, onOpenChange }: LiveStreamCrea
                 <DialogClose asChild><Button variant="ghost" size="icon"><X /></Button></DialogClose>
               </div>
             </DialogHeader>
-            
+
             <div className="flex-1 p-6 space-y-8 max-w-md mx-auto w-full">
               <div className="relative aspect-[9/16] bg-zinc-800 rounded-3xl overflow-hidden border-4 border-white/5 shadow-2xl">
-                <video 
-                  ref={videoRef} 
-                  autoPlay 
-                  muted 
-                  playsInline 
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
                   className="w-full h-full object-cover"
                   style={{ transform: 'scaleX(-1)' }}
                 />
@@ -112,15 +155,15 @@ export default function LiveStreamCreator({ open, onOpenChange }: LiveStreamCrea
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Show Title</Label>
-                  <Input 
-                    placeholder="e.g., My Morning Routine, Live Sale!..." 
+                  <Input
+                    placeholder="e.g., My Morning Routine, Live Sale!..."
                     className="bg-zinc-900 border-white/10 text-white h-12"
                     value={title}
                     onChange={e => setTitle(e.target.value)}
                   />
                 </div>
-                
-                <div 
+
+                <div
                   className={cn(
                     "p-4 rounded-xl border transition-all cursor-pointer flex items-center gap-4",
                     isBusiness ? "bg-primary/10 border-primary" : "bg-zinc-900 border-white/10"
@@ -136,7 +179,7 @@ export default function LiveStreamCreator({ open, onOpenChange }: LiveStreamCrea
                   </div>
                 </div>
 
-                <Button 
+                <Button
                   className="w-full h-14 text-lg font-bold bg-primary hover:bg-primary/90"
                   onClick={handleGoLive}
                   disabled={isStarting || !hasPermission}
@@ -149,15 +192,15 @@ export default function LiveStreamCreator({ open, onOpenChange }: LiveStreamCrea
           </div>
         ) : (
           <div className="flex-1 relative flex flex-col h-full">
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              muted 
-              playsInline 
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
               className="absolute inset-0 w-full h-full object-cover"
               style={{ transform: 'scaleX(-1)' }}
             />
-            
+
             <div className="absolute top-0 left-0 right-0 p-6 z-20 flex justify-between items-start bg-gradient-to-b from-black/60 to-transparent">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
@@ -165,25 +208,29 @@ export default function LiveStreamCreator({ open, onOpenChange }: LiveStreamCrea
                     <div className="w-2 h-2 rounded-full bg-white animate-ping" /> LIVE
                   </Badge>
                   <Badge variant="secondary" className="bg-black/40 backdrop-blur-md flex items-center gap-1.5 px-3 py-1">
-                    <Users className="w-3 h-3" /> 0
+                    <Users className="w-3 h-3" /> {comments.length}
                   </Badge>
                 </div>
                 <h3 className="font-bold text-lg shadow-black [text-shadow:0_1px_4px_rgba(0,0,0,0.8)]">{title}</h3>
               </div>
-              <Button variant="destructive" size="sm" onClick={() => onOpenChange(false)}>End Show</Button>
+              <Button variant="destructive" size="sm" onClick={handleEndShow}>End Show</Button>
             </div>
 
             <div className="mt-auto p-6 z-20 space-y-4 bg-gradient-to-t from-black/80 to-transparent">
-              <div className="h-48 overflow-hidden relative">
-                <div className="absolute bottom-0 w-full space-y-2 opacity-60">
-                  <p className="text-sm"><span className="font-bold text-primary">System:</span> Waiting for viewers to join...</p>
-                </div>
+              <div className="h-48 overflow-y-auto relative flex flex-col justify-end gap-1.5">
+                {comments.length === 0 ? (
+                  <p className="text-sm opacity-60"><span className="font-bold text-primary">System:</span> Waiting for viewers to join...</p>
+                ) : (
+                  comments.slice(-20).map(c => (
+                    <p key={c.id} className="text-sm"><span className="font-bold text-primary">@{c.authorHandle}:</span> {c.text}</p>
+                  ))
+                )}
               </div>
-              
-              <div className="flex gap-2">
-                <Input placeholder="Say something..." className="bg-black/40 border-white/20 text-white rounded-full h-12" />
-                <Button size="icon" variant="secondary" className="rounded-full h-12 w-12"><MessageSquare/></Button>
-              </div>
+
+              <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); handleSendChat(); }}>
+                <Input placeholder="Say something..." className="bg-black/40 border-white/20 text-white rounded-full h-12" value={chatInput} onChange={e => setChatInput(e.target.value)} />
+                <Button type="submit" size="icon" variant="secondary" className="rounded-full h-12 w-12" disabled={!chatInput.trim()}><Send/></Button>
+              </form>
             </div>
           </div>
         )}

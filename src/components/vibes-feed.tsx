@@ -1,34 +1,44 @@
 "use client";
 
-import React, { useState, useTransition, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
+import React, { useState, useTransition, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Camera, Image as ImageIcon, Sparkles, Heart, Send, Share2, MoreVertical, Music, Loader2, X, Plus, Play, BrainCircuit, Gift, Download, Waves, MapPin, Users, Video, Clock, Eye, Signal, MessageSquare, Phone, Radio, ShoppingBag } from "lucide-react";
+import { Camera, Image as ImageIcon, Sparkles, Heart, Send, BrainCircuit, Gift, Waves, MapPin, Users, Phone, X, Music, Trash2, Loader2 } from "lucide-react";
 import Image from 'next/image';
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { generateVibeVideoAction, recommendVibes, generateStoryAction, analyzeVibePost, AnalyzeVibePostOutput } from "@/app/actions";
+import { generateVibeVideoAction, analyzeVibePost, AnalyzeVibePostOutput } from "@/app/actions";
 import { getIdToken } from "@/lib/get-id-token";
 import CameraView from "./camera-view";
 import { Badge } from "./ui/badge";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "./ui/card";
-import { Watermark } from "./watermark";
 import { ScrollArea } from "./ui/scroll-area";
 import { Input } from "./ui/input";
 import { Skeleton } from "./ui/skeleton";
 import AppCall, { CallTarget } from "./app-call";
+import type { UserProfile } from "@/lib/users";
+import {
+    subscribeToVibePosts,
+    createVibePost,
+    deleteVibePost,
+    toggleLike,
+    toggleWave,
+    subscribeToComments,
+    addComment,
+    type VibePost,
+    type VibeComment,
+} from "@/lib/vibes";
+import { sendGift } from "@/lib/wallet";
+import { Timestamp } from "firebase/firestore";
 
 const PanoramaView = lazy(() => import('./panorama-view'));
 
-// --- MOCK DATA ---
 const sampleMusic = [
-    { id: 1, title: "Desert Mirage", artist: "Nadia" },
-    { id: 2, title: "City Lights", artist: "DXB Flow" },
+    { title: "Desert Mirage", artist: "Nadia" },
+    { title: "City Lights", artist: "DXB Flow" },
 ];
 
 const virtualGifts = [
@@ -39,16 +49,9 @@ const virtualGifts = [
     { id: 'trophy', name: 'Diamond Trophy', icon: '💎', price: 500 },
 ];
 
-export const initialMockPosts = [
-    { id: 'live-1', type: 'live', user: { name: "Aisha's Boutique", avatar: "https://picsum.photos/seed/aishaboutique/40/40" }, title: "Summer Collection Live Sale! 👗", viewers: 124, isShopping: true, product: { name: "Silk Wrap Dress", price: "Dhs. 450", image: "https://picsum.photos/seed/dress/200/200" }, timestamp: new Date() },
-    { id: 'hotspot-1', type: 'hotspot', businessName: "Artisan's Corner", avatar: "https://picsum.photos/seed/artisans/40/40", text: "Grand Opening! ✨ Handmade crafts 20% off.", location: "Alserkal Avenue", media: ["https://picsum.photos/seed/shop-interior/900/1600"], mediaTypes: ['photo'], timestamp: new Date(Date.now() - 3600000), user: { name: "Artisan's Corner" }, likes: 302, waves: 88, hint: "handmade crafts" },
-    { id: 1, type: 'post', user: { name: "Aisha", avatar: "https://picsum.photos/id/1027/40/40" }, timestamp: new Date(Date.now() - 7200000), text: "Morning coffee view.", media: ["https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4"], mediaTypes: ['video'], hint: "coffee view", music: null, likes: 124, waves: 12 },
-    { id: 'hotspot-2', type: 'hotspot-360', businessName: "The Italian Place", avatar: "https://picsum.photos/seed/pizza-logo/40/40", text: "Step inside! 🍕", location: "JLT, Cluster D", media: ["https://picsum.photos/seed/pano-restaurant/2048/1024"], mediaTypes: ['360-photo'], timestamp: new Date(Date.now() - 43200000), user: { name: "The Italian Place" }, likes: 450, waves: 150, hint: "restaurant interior" },
-];
-
-const formatTimestamp = (date: Date | string, now: Date): string => {
-    const postDate = typeof date === 'string' ? new Date(date) : date;
-    if (!(postDate instanceof Date) || isNaN(postDate.getTime())) return "just now";
+const formatTimestamp = (timestamp: Timestamp | null, now: Date): string => {
+    if (!timestamp) return "just now";
+    const postDate = timestamp.toDate();
     const seconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
     if (seconds < 60) return `${seconds}s ago`;
     const minutes = Math.floor(seconds / 60);
@@ -58,20 +61,43 @@ const formatTimestamp = (date: Date | string, now: Date): string => {
     return `${Math.floor(hours / 24)}d ago`;
 };
 
-const LiveStreamViewer = ({ post, open, onOpenChange }: { post: any | null; open: boolean; onOpenChange: (open: boolean) => void; }) => {
-    const [comments, setComments] = useState<{ id: number, user: string, text: string, type?: 'chat' | 'gift' }[]>([
-        { id: 1, user: 'Omar', text: 'Love that dress!', type: 'chat' },
-        { id: 2, user: 'Ali', text: 'Greetings from Abu Dhabi! 🇦🇪', type: 'chat' }
-    ]);
+const LiveStreamViewer = ({ post, open, onOpenChange, myProfile }: { post: VibePost | null; open: boolean; onOpenChange: (open: boolean) => void; myProfile: UserProfile | null }) => {
+    const [comments, setComments] = useState<VibeComment[]>([]);
     const [newComment, setNewComment] = useState('');
     const [isGiftMenuOpen, setIsGiftMenuOpen] = useState(false);
     const { toast } = useToast();
 
-    const handleSendGift = (gift: typeof virtualGifts[0]) => {
-        const streamerShare = gift.price * 0.8;
-        setComments(prev => [...prev, { id: Date.now(), user: 'You', text: `sent ${gift.name} ${gift.icon}`, type: 'gift' }]);
+    useEffect(() => {
+        if (!post || !open) return;
+        return subscribeToComments(post.id, setComments);
+    }, [post, open]);
+
+    const handleSend = async () => {
+        if (!newComment.trim() || !post || !myProfile) return;
+        const text = newComment;
+        setNewComment('');
+        try {
+            await addComment(post.id, { uid: myProfile.uid, handle: myProfile.handle }, text, 'chat');
+        } catch {
+            toast({ variant: 'destructive', title: "Couldn't send", description: "Please try again." });
+        }
+    };
+
+    const handleSendGift = async (gift: typeof virtualGifts[0]) => {
+        if (!post || !myProfile) return;
         setIsGiftMenuOpen(false);
-        toast({ title: "Gift Sent!", description: `Dhs. ${gift.price} charged. Streamer earns Dhs. ${streamerShare.toFixed(2)}.` });
+        try {
+            await sendGift(
+                { uid: myProfile.uid, handle: myProfile.handle },
+                { uid: post.authorUid, handle: post.authorHandle },
+                gift.name,
+                gift.price
+            );
+            await addComment(post.id, { uid: myProfile.uid, handle: myProfile.handle }, `sent ${gift.name} ${gift.icon}`, 'gift', gift.name);
+            toast({ title: "Gift Sent!", description: `${gift.icon} ${gift.name} sent to @${post.authorHandle}.` });
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Gift Failed", description: err instanceof Error ? err.message : "Please try again." });
+        }
     };
 
     if (!post) return null;
@@ -85,11 +111,11 @@ const LiveStreamViewer = ({ post, open, onOpenChange }: { post: any | null; open
                         <div className="flex flex-col gap-2">
                             <div className="flex gap-2">
                                 <Badge variant="destructive" className="animate-pulse">LIVE</Badge>
-                                <Badge variant="secondary" className="bg-black/40"><Users className="w-3 h-3 mr-1" /> {post.viewers}</Badge>
+                                <Badge variant="secondary" className="bg-black/40"><Users className="w-3 h-3 mr-1" /> {post.viewers ?? 0}</Badge>
                             </div>
                             <div className="flex items-center gap-2 mt-2">
-                                <Avatar className="w-8 h-8 border-2 border-white/20"><AvatarImage src={post.user.avatar} /></Avatar>
-                                <p className="font-bold shadow-black [text-shadow:0_1px_4px_rgba(0,0,0,0.8)]">{post.user.name}</p>
+                                <Avatar className="w-8 h-8 border-2 border-white/20"><AvatarImage src={post.authorPhotoURL || undefined} /><AvatarFallback>{post.authorDisplayName.charAt(0)}</AvatarFallback></Avatar>
+                                <p className="font-bold shadow-black [text-shadow:0_1px_4px_rgba(0,0,0,0.8)]">{post.authorDisplayName}</p>
                             </div>
                         </div>
                         <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}><X /></Button>
@@ -111,16 +137,16 @@ const LiveStreamViewer = ({ post, open, onOpenChange }: { post: any | null; open
                             <div className="flex flex-col gap-1 pr-4">
                                 {comments.map(c => (
                                     <div key={c.id} className={cn("text-sm p-1.5 rounded-lg max-w-fit", c.type === 'gift' ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "bg-black/20")}>
-                                        <span className="font-bold mr-2 text-primary">{c.user}:</span> {c.text}
+                                        <span className="font-bold mr-2 text-primary">@{c.authorHandle}:</span> {c.text}
                                     </div>
                                 ))}
                             </div>
                         </ScrollArea>
-                        <div className="flex gap-2">
+                        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); handleSend(); }}>
                             <Input placeholder="Say something..." className="rounded-full bg-black/40 border-white/20" value={newComment} onChange={e => setNewComment(e.target.value)} />
-                            <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full" onClick={() => setIsGiftMenuOpen(true)}><Gift className="text-amber-400"/></Button>
-                            <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full"><Heart className="text-red-500 fill-red-500"/></Button>
-                        </div>
+                            <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-full" onClick={() => setIsGiftMenuOpen(true)}><Gift className="text-amber-400"/></Button>
+                            <Button type="submit" variant="ghost" size="icon" className="h-10 w-10 rounded-full" disabled={!newComment.trim()}><Send className="w-4 h-4"/></Button>
+                        </form>
                     </div>
 
                     {isGiftMenuOpen && (
@@ -150,10 +176,12 @@ const LiveStreamViewer = ({ post, open, onOpenChange }: { post: any | null; open
     );
 };
 
-const PostCard = ({ post, onDelete, onInteract, onOpen, onCall }: { post: any; onDelete: (id: any) => void; onInteract: (post: any) => void; onOpen: (post: any) => void; onCall: (target: CallTarget) => void; }) => {
+const PostCard = ({ post, myUid, onOpen, onCall, onDelete }: { post: VibePost; myUid?: string; onOpen: (post: VibePost) => void; onCall: (target: CallTarget) => void; onDelete: (post: VibePost) => void; }) => {
     const isHotspot = post.type.startsWith('hotspot');
     const isLive = post.type === 'live';
-    const user = isHotspot ? { name: post.businessName, avatar: post.avatar } : post.user;
+    const isMine = post.authorUid === myUid;
+    const isLiked = myUid ? post.likedBy.includes(myUid) : false;
+    const isWaved = myUid ? post.wavedBy.includes(myUid) : false;
     const [now, setNow] = useState(new Date());
     const [isAnalyzing, setIsAnalyzing] = useState(false);
 
@@ -164,8 +192,18 @@ const PostCard = ({ post, onDelete, onInteract, onOpen, onCall }: { post: any; o
 
     const handleCallAction = (e: React.MouseEvent) => {
         e.stopPropagation();
-        onCall({ name: user.name, avatar: user.avatar, type: isHotspot ? 'business' : 'user' });
+        onCall({ name: post.authorDisplayName, avatar: post.authorPhotoURL || undefined, type: isHotspot ? 'business' : 'user' });
     }
+
+    const handleLike = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (myUid) toggleLike(post.id, myUid).catch(() => {});
+    };
+
+    const handleWave = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (myUid) toggleWave(post.id, myUid).catch(() => {});
+    };
 
     return (
         <div className={cn("h-full w-full relative rounded-[2rem] overflow-hidden border transition-all hover:scale-[1.01] bg-black shadow-2xl", isHotspot ? "border-amber-400/20" : "border-white/10")} onClick={() => onOpen(post)}>
@@ -181,21 +219,26 @@ const PostCard = ({ post, onDelete, onInteract, onOpen, onCall }: { post: any; o
                 )
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 pointer-events-none" />
-            
+
             <div className="absolute top-6 left-6 right-6 flex items-center gap-3 z-10">
-                <Avatar className="w-10 h-10 border-2 border-white/20"><AvatarImage src={user.avatar}/></Avatar>
+                <Avatar className="w-10 h-10 border-2 border-white/20"><AvatarImage src={post.authorPhotoURL || undefined}/><AvatarFallback>{post.authorDisplayName.charAt(0)}</AvatarFallback></Avatar>
                 <div>
-                    <p className="font-bold text-sm shadow-black [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">{user.name}</p>
-                    <p className="text-[10px] text-white/60">{isLive ? 'Live Now' : formatTimestamp(post.timestamp, now)}</p>
+                    <p className="font-bold text-sm shadow-black [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">{isHotspot && post.businessName ? post.businessName : post.authorDisplayName}</p>
+                    <p className="text-[10px] text-white/60">{isLive ? 'Live Now' : formatTimestamp(post.createdAt, now)}</p>
                 </div>
                 {isHotspot && <Badge className="bg-amber-500/20 text-amber-300 ml-auto border-amber-500/20">Sponsored</Badge>}
                 {isLive && <Badge variant="destructive" className="ml-auto animate-pulse">LIVE</Badge>}
+                {isMine && !isHotspot && !isLive && (
+                    <button className="ml-auto p-1.5 rounded-full bg-black/30 hover:bg-black/50" onClick={(e) => { e.stopPropagation(); onDelete(post); }}>
+                        <Trash2 className="w-4 h-4 text-white/70" />
+                    </button>
+                )}
             </div>
 
             <div className="absolute bottom-6 left-6 right-20 z-10">
-                <p className="text-sm text-white/90 line-clamp-3 mb-2">{post.text || post.title}</p>
+                <p className="text-sm text-white/90 line-clamp-3 mb-2">{post.text}</p>
                 {isHotspot && <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-300"><MapPin className="w-3 h-3"/> {post.location}</div>}
-                {isLive && <div className="flex items-center gap-2 text-[10px] font-bold text-white/70"><Users className="w-3 h-3"/> {post.viewers} watching</div>}
+                {isLive && <div className="flex items-center gap-2 text-[10px] font-bold text-white/70"><Users className="w-3 h-3"/> {post.viewers ?? 0} watching</div>}
             </div>
 
             <div className="absolute bottom-6 right-6 flex flex-col gap-6 z-10 items-center">
@@ -209,12 +252,12 @@ const PostCard = ({ post, onDelete, onInteract, onOpen, onCall }: { post: any; o
                         <span className="text-[10px] font-bold">Call</span>
                     </button>
                 )}
-                <button className="group flex flex-col items-center gap-1" onClick={(e) => { e.stopPropagation(); onInteract(post); }}>
-                    <Heart className={cn("w-7 h-7 transition-all group-hover:scale-110", isLive && "fill-red-500 text-red-500")} />
+                <button className="group flex flex-col items-center gap-1" onClick={handleLike}>
+                    <Heart className={cn("w-7 h-7 transition-all group-hover:scale-110", isLiked && "fill-red-500 text-red-500")} />
                     <span className="text-[10px] font-bold">{post.likes || 0}</span>
                 </button>
-                <button className="group flex flex-col items-center gap-1" onClick={(e) => { e.stopPropagation(); onInteract(post); }}>
-                    <Waves className="w-7 h-7 group-hover:scale-110 transition-transform" />
+                <button className="group flex flex-col items-center gap-1" onClick={handleWave}>
+                    <Waves className={cn("w-7 h-7 group-hover:scale-110 transition-transform", isWaved && "text-cyan-400")} />
                     <span className="text-[10px] font-bold">{post.waves || 0}</span>
                 </button>
             </div>
@@ -223,7 +266,7 @@ const PostCard = ({ post, onDelete, onInteract, onOpen, onCall }: { post: any; o
     );
 };
 
-const AiAnalysisDialog = ({ post, open, onOpenChange }: { post: any; open: boolean; onOpenChange: (open: boolean) => void; }) => {
+const AiAnalysisDialog = ({ post, open, onOpenChange }: { post: VibePost; open: boolean; onOpenChange: (open: boolean) => void; }) => {
     const [analysis, setAnalysis] = useState<AnalyzeVibePostOutput | null>(null);
     const [isPending, startTransition] = useTransition();
     const router = useRouter();
@@ -233,7 +276,7 @@ const AiAnalysisDialog = ({ post, open, onOpenChange }: { post: any; open: boole
             startTransition(async () => {
                 try {
                     const idToken = await getIdToken();
-                    const res = await analyzeVibePost(idToken, { postText: post.text || post.title, mediaHint: post.hint });
+                    const res = await analyzeVibePost(idToken, { postText: post.text || post.businessName || '', mediaHint: post.hint });
                     setAnalysis(res);
                 } catch (e) { onOpenChange(false); }
             });
@@ -265,11 +308,13 @@ const AiAnalysisDialog = ({ post, open, onOpenChange }: { post: any; open: boole
     );
 };
 
-export const CreateVibeDialog = ({ open, onOpenChange, onPost }: { open: boolean, onOpenChange: (open: boolean) => void, onPost: (post: any) => void }) => {
+export const CreateVibeDialog = ({ open, onOpenChange, profile }: { open: boolean, onOpenChange: (open: boolean) => void, profile: UserProfile | null }) => {
     const [text, setText] = useState("");
     const [media, setMedia] = useState<{ uri: string, type: 'photo' | 'video' }[]>([]);
+    const [selectedMusic, setSelectedMusic] = useState<typeof sampleMusic[0] | null>(null);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [isVibifying, setIsVibifying] = useState(false);
+    const [isPosting, setIsPosting] = useState(false);
     const { toast } = useToast();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -282,8 +327,33 @@ export const CreateVibeDialog = ({ open, onOpenChange, onPost }: { open: boolean
             const res = await generateVibeVideoAction(idToken, { textPrompt: text, photoDataUri: photo });
             setMedia(prev => [...prev, { uri: res.videoDataUri, type: 'video' }]);
             toast({ title: "✨ Vibified!", description: "AI video generated successfully." });
-        } catch (e) { toast({ variant: "destructive", title: "Vibify Offline" }); }
+        } catch (e) { toast({ variant: "destructive", title: "Vibify Offline", description: e instanceof Error ? e.message : undefined }); }
         finally { setIsVibifying(false); }
+    };
+
+    const reset = () => {
+        setText("");
+        setMedia([]);
+        setSelectedMusic(null);
+    };
+
+    const handleShare = async () => {
+        if (!profile || !text.trim()) return;
+        setIsPosting(true);
+        try {
+            await createVibePost(profile, {
+                type: 'post',
+                text,
+                media: media.map(m => m.uri),
+                mediaTypes: media.map(m => m.type),
+            });
+            reset();
+            onOpenChange(false);
+        } catch (e) {
+            toast({ variant: "destructive", title: "Couldn't post", description: e instanceof Error ? e.message : "Please try again." });
+        } finally {
+            setIsPosting(false);
+        }
     };
 
     return (
@@ -303,6 +373,21 @@ export const CreateVibeDialog = ({ open, onOpenChange, onPost }: { open: boolean
                                 ))}
                             </div>
                         )}
+                        <div className="flex flex-wrap gap-2">
+                            {sampleMusic.map(m => (
+                                <button
+                                    key={m.title}
+                                    type="button"
+                                    onClick={() => setSelectedMusic(selectedMusic?.title === m.title ? null : m)}
+                                    className={cn(
+                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border transition-colors",
+                                        selectedMusic?.title === m.title ? "bg-purple-600 border-purple-500 text-white" : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+                                    )}
+                                >
+                                    <Music className="w-3 h-3" /> {m.title} · {m.artist}
+                                </button>
+                            ))}
+                        </div>
                         <div className="flex items-center gap-3">
                             <Button variant="outline" size="icon" className="w-12 h-12 rounded-full border-white/10 bg-white/5" onClick={() => setIsCameraOpen(true)}><Camera className="w-5 h-5"/></Button>
                             <Button variant="outline" size="icon" className="w-12 h-12 rounded-full border-white/10 bg-white/5" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-5 h-5"/></Button>
@@ -319,8 +404,10 @@ export const CreateVibeDialog = ({ open, onOpenChange, onPost }: { open: boolean
                         </div>
                     </div>
                     <DialogFooter className="flex-row gap-2">
-                        <DialogClose asChild><Button variant="ghost" className="flex-1 rounded-full h-12 font-bold">Discard</Button></DialogClose>
-                        <Button className="flex-[2] rounded-full h-12 font-bold bg-white text-black hover:bg-zinc-200" onClick={() => { onPost({ id: Date.now(), user: { name: "You", avatar: "https://picsum.photos/id/237/40/40" }, timestamp: new Date(), text, media: media.map(m => m.uri), mediaTypes: media.map(m => m.type), likes: 0, waves: 0, type: 'post' }); onOpenChange(false); }}>Share Vibe</Button>
+                        <DialogClose asChild><Button variant="ghost" className="flex-1 rounded-full h-12 font-bold" onClick={reset}>Discard</Button></DialogClose>
+                        <Button className="flex-[2] rounded-full h-12 font-bold bg-white text-black hover:bg-zinc-200" onClick={handleShare} disabled={isPosting || !text.trim()}>
+                            {isPosting ? <Loader2 className="animate-spin mr-2" /> : null} Share Vibe
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -329,25 +416,48 @@ export const CreateVibeDialog = ({ open, onOpenChange, onPost }: { open: boolean
     );
 };
 
-export function VibeFeed({ posts, setPosts }: { posts: any[], setPosts: React.Dispatch<React.SetStateAction<any[]>> }) {
-    const [viewingPost, setViewingPost] = useState<any | null>(null);
+export function VibeFeed({ profile }: { profile: UserProfile | null }) {
+    const [posts, setPosts] = useState<VibePost[] | null>(null);
+    const [viewingPost, setViewingPost] = useState<VibePost | null>(null);
     const [activeCall, setActiveCall] = useState<CallTarget | null>(null);
-    const [isPending, startTransition] = useTransition();
+    const { toast } = useToast();
 
-    const handleInteract = (post: any) => {
-        setPosts(prev => prev.map(p => p.id === post.id ? { ...p, likes: (p.likes || 0) + 1 } : p));
+    useEffect(() => subscribeToVibePosts(setPosts), []);
+
+    const handleDelete = async (post: VibePost) => {
+        try {
+            await deleteVibePost(post.id);
+        } catch {
+            toast({ variant: 'destructive', title: "Couldn't delete", description: "Please try again." });
+        }
     };
 
-    const sortedPosts = useMemo(() => [...posts].sort((a, b) => b.timestamp - a.timestamp), [posts]);
+    if (posts === null) {
+        return (
+            <div className="w-full max-w-lg mx-auto py-6 px-4">
+                <Skeleton className="h-[70vh] min-h-[500px] w-full rounded-[2rem] bg-white/5" />
+            </div>
+        );
+    }
+
+    if (posts.length === 0) {
+        return (
+            <div className="w-full max-w-lg mx-auto py-16 px-4 text-center text-white/60">
+                <Sparkles className="w-10 h-10 mx-auto mb-4 text-white/30" />
+                <p className="font-bold text-white/80">No vibes yet</p>
+                <p className="text-sm mt-1">Be the first to share what's happening around you.</p>
+            </div>
+        );
+    }
 
     return (
         <div className="w-full max-w-lg mx-auto py-6 space-y-10 px-4">
-            {sortedPosts.map(p => (
+            {posts.map(p => (
                 <div key={p.id} className="h-[85vh] min-h-[600px] w-full">
-                    <PostCard post={p} onDelete={(id) => setPosts(prev => prev.filter(x => x.id !== id))} onInteract={handleInteract} onOpen={setViewingPost} onCall={setActiveCall} />
+                    <PostCard post={p} myUid={profile?.uid} onDelete={handleDelete} onOpen={setViewingPost} onCall={setActiveCall} />
                 </div>
             ))}
-            <LiveStreamViewer post={viewingPost?.type === 'live' ? viewingPost : null} open={viewingPost?.type === 'live'} onOpenChange={(o) => !o && setViewingPost(null)} />
+            <LiveStreamViewer post={viewingPost?.type === 'live' ? viewingPost : null} open={viewingPost?.type === 'live'} onOpenChange={(o) => !o && setViewingPost(null)} myProfile={profile} />
             <AppCall open={!!activeCall} onOpenChange={(o) => !o && setActiveCall(null)} target={activeCall} />
         </div>
     );

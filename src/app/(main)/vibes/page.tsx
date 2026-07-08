@@ -1,18 +1,24 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Waves, Sparkles, Map, List, Camera, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import Image from "next/image";
-import { VibeFeed, CreateVibeDialog, initialMockPosts } from "@/components/vibes-feed";
-import { useToast } from "@/hooks/use-toast";
+import { VibeFeed, CreateVibeDialog } from "@/components/vibes-feed";
 import { FriendStoryCarousel, SuggestionCards } from "@/components/friends-carousel";
 import { Switch } from "@/components/ui/switch";
 import AuraNaya from "@/components/aura-naya";
 import Link from "next/link";
+import { useAuth } from "@/contexts/auth-provider";
+import { subscribeToUserProfile, type UserProfile } from "@/lib/users";
+import { Skeleton } from "@/components/ui/skeleton";
 
+const VibesMap = dynamic(() => import("@/components/vibes-map"), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[70vh] w-full rounded-2xl bg-white/5" />,
+});
 
 const Logo = (props: React.SVGProps<SVGSVGElement>) => (
     <svg
@@ -37,23 +43,22 @@ const Logo = (props: React.SVGProps<SVGSVGElement>) => (
 );
 
 export default function VibeHubPage() {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState("vibes");
   const [vibeView, setVibeView] = useState("feed");
   const [isVibeCreatorOpen, setIsVibeCreatorOpen] = useState(false);
-  const [allPosts, setAllPosts] = useState<any[]>(initialMockPosts); 
-  const { toast } = useToast();
-  
-  const handlePost = (post: any) => {
-    // Add the new post to the beginning of the feed
-    setAllPosts(prev => [post, ...prev]);
-  };
 
+  useEffect(() => {
+    if (!user) return;
+    return subscribeToUserProfile(user.uid, setProfile);
+  }, [user]);
 
   return (
     <>
       <div className="w-full min-h-screen flex flex-col bg-gradient-to-br from-indigo-900 via-purple-900 to-black relative overflow-y-auto">
         {/* 3D Background */}
-        <div 
+        <div
           className="absolute inset-0 z-0 animate-stars"
           style={{
             backgroundImage: `
@@ -106,7 +111,7 @@ export default function VibeHubPage() {
                 Aura x Naya
                 </TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="vibes" className="mt-4">
                 <div className="flex items-center justify-center py-4">
                    <div className="flex items-center space-x-2 bg-black/20 p-1.5 rounded-full border border-white/10 text-white backdrop-blur-sm">
@@ -120,31 +125,26 @@ export default function VibeHubPage() {
                       <Map className="w-4 h-4 mr-2" />
                   </div>
                 </div>
-              
+
               {vibeView === 'feed' ? (
                   <>
                       <FriendStoryCarousel onAddStory={() => setIsVibeCreatorOpen(true)} />
                       <SuggestionCards />
-                      <VibeFeed posts={allPosts} setPosts={setAllPosts} />
+                      <VibeFeed profile={profile} />
                   </>
               ) : (
-                  <div className="h-[70vh] rounded-2xl overflow-hidden relative border border-white/10 bg-black/20">
-                      <Image src="https://picsum.photos/seed/mapview/800/1200" alt="Map View" fill className="object-cover opacity-50"/>
-                       <div className="absolute inset-0 flex items-center justify-center">
-                          <p className="text-white/70">Map View Placeholder</p>
-                      </div>
-                  </div>
+                  <VibesMap />
               )}
 
             </TabsContent>
-            
+
             <TabsContent value="aura-naya" className="mt-4">
                 <AuraNaya />
             </TabsContent>
           </Tabs>
         </div>
       </div>
-      <CreateVibeDialog open={isVibeCreatorOpen} onOpenChange={setIsVibeCreatorOpen} onPost={handlePost} />
+      <CreateVibeDialog open={isVibeCreatorOpen} onOpenChange={setIsVibeCreatorOpen} profile={profile} />
     </>
   );
 }
