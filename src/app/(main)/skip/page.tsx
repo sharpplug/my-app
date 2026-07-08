@@ -30,7 +30,8 @@ import {
     Users,
     Clock,
     Sparkles,
-    Search
+    Search,
+    Banknote
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from '@/lib/utils';
@@ -161,7 +162,7 @@ const VehicleSelectionStep = ({ rideOptions, onSelectRide, onBack, currency }: {
     </div>
 );
 
-const PaymentStep = ({ ride, onConfirm, onBack, currency, region, isPaying }: { ride: RideOption, onConfirm: () => void, onBack: () => void, currency: any, region: string, isPaying: boolean }) => (
+const PaymentStep = ({ ride, rideType, onConfirm, onBack, currency, region, isPaying }: { ride: RideOption, rideType: RideType, onConfirm: (method: 'wallet' | 'cash') => void, onBack: () => void, currency: any, region: string, isPaying: boolean }) => (
     <div className="space-y-6">
         <div className="text-center space-y-2">
             <h3 className="text-xl font-bold font-headline">Trip Overview</h3>
@@ -186,16 +187,20 @@ const PaymentStep = ({ ride, onConfirm, onBack, currency, region, isPaying }: { 
                     <span className="font-bold">Global Credit Card</span>
                     <Badge variant="secondary" className="ml-auto">Coming Soon</Badge>
                 </Button>
-                <Button variant="outline" className="h-14 rounded-2xl justify-start px-4 gap-3 border-primary/30 bg-primary/5" onClick={onConfirm} disabled={isPaying}>
+                <Button variant="outline" className="h-14 rounded-2xl justify-start px-4 gap-3 border-primary/30 bg-primary/5" onClick={() => onConfirm('wallet')} disabled={isPaying}>
                     {isPaying ? <Loader2 className="animate-spin text-amber-500" /> : <Zap className="text-amber-500" />}
                     <span className="font-bold">Wallet Balance</span>
+                </Button>
+                <Button variant="outline" className="h-14 rounded-2xl justify-start px-4 gap-3 border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10" onClick={() => onConfirm('cash')} disabled={isPaying}>
+                    <Banknote className="text-emerald-600" />
+                    <span className="font-bold">{rideType === 'courier' ? 'Cash on Delivery' : 'Cash to Driver'}</span>
                 </Button>
             </div>
         </div>
 
         <div className="p-4 bg-muted/50 rounded-2xl text-[10px] text-muted-foreground flex gap-2">
             <ShieldCheck className="w-4 h-4 text-primary shrink-0" />
-            <p>Paid instantly from your Moood wallet balance.</p>
+            <p>Wallet payments are instant. Cash is paid directly to your {rideType === 'courier' ? 'courier on delivery' : 'driver on arrival'} — no wallet balance required.</p>
         </div>
 
         <Button variant="ghost" className="w-full font-bold" onClick={onBack} disabled={isPaying}>Change Vehicle</Button>
@@ -236,11 +241,13 @@ export default function SkipPage() {
       setStep('payment');
   }
 
-  const handlePaymentConfirm = async () => {
+  const handlePaymentConfirm = async (method: 'wallet' | 'cash') => {
       if (!user || !selectedRide) return;
       setIsPaying(true);
       try {
-          await spendFunds(user.uid, `${selectedRide.name} ride`, selectedRide.price);
+          if (method === 'wallet') {
+              await spendFunds(user.uid, `${selectedRide.name} ride`, selectedRide.price);
+          }
           setStep('searching');
           setTimeout(() => setStep('confirmed'), 2500);
       } catch (err) {
@@ -320,7 +327,7 @@ export default function SkipPage() {
                   ) : step === 'vehicles' ? (
                       <VehicleSelectionStep rideOptions={rideOptions} onSelectRide={handleRideSelect} onBack={() => setStep('initial')} currency={currency} />
                   ) : step === 'payment' && selectedRide ? (
-                      <PaymentStep ride={selectedRide} onConfirm={handlePaymentConfirm} onBack={() => setStep('vehicles')} currency={currency} region={region} isPaying={isPaying} />
+                      <PaymentStep ride={selectedRide} rideType={activeTab} onConfirm={handlePaymentConfirm} onBack={() => setStep('vehicles')} currency={currency} region={region} isPaying={isPaying} />
                   ) : step === 'searching' ? (
                       <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
                           <div className="relative h-24 w-24">
