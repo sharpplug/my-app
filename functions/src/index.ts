@@ -32,6 +32,33 @@ const userRef = (uid: string) => db.collection("users").doc(uid);
 const topupIntentRef = (id: string) => db.collection("topupIntents").doc(id);
 const productRef = (id: string) => db.collection("products").doc(id);
 const withdrawalIntentRef = (id: string) => db.collection("withdrawalIntents").doc(id);
+const notificationsRef = (uid: string) => db.collection("notifications").doc(uid).collection("items");
+
+/**
+ * Every vertical writes its own "something happened to your account"
+ * events here instead of nowhere - this is the glue that makes a gift, a
+ * sale, a top-up, or a withdrawal visible outside the one page you
+ * happened to be on when it occurred. See src/components/notification-bell.tsx
+ * for the client side.
+ */
+function notify(tx: Transaction, uid: string, title: string, body: string): void {
+  tx.set(notificationsRef(uid).doc(), {
+    title,
+    body,
+    read: false,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
+/** Same as notify(), for the few call sites (webhooks) that aren't already inside a transaction. */
+async function notifyDirect(uid: string, title: string, body: string): Promise<void> {
+  await notificationsRef(uid).add({
+    title,
+    body,
+    read: false,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
 
 // Every mobile money / bank rail surfaced across the app's four regions
 // (AE, KE, UG, ZA - see src/components/wallet-tab.tsx), mapped to the kind
@@ -144,6 +171,7 @@ export const sendFunds = onCall(async (request) => {
       sender: senderHandle,
       createdAt: FieldValue.serverTimestamp(),
     });
+    notify(tx, recipientUid, "Money Received", `@${senderHandle} sent you ${amount.toFixed(2)}.`);
   });
 
   return { ok: true };
@@ -205,6 +233,7 @@ export const sendGift = onCall(async (request) => {
       sender: viewerHandle,
       createdAt: FieldValue.serverTimestamp(),
     });
+    notify(tx, streamerUid, "Gift Received", `@${viewerHandle} sent you a ${giftName}!`);
   });
 
   return { ok: true };
@@ -256,6 +285,7 @@ export const spendFunds = onCall(async (request) => {
         item: product.title,
         createdAt: FieldValue.serverTimestamp(),
       });
+      notify(tx, product.ownerUid, "You Made a Sale!", `"${product.title}" sold for ${sellerShare.toFixed(2)}.`);
     });
 
     return { ok: true };
@@ -336,6 +366,7 @@ async function completeTopUpIntent(intentId: string): Promise<void> {
       createdAt: FieldValue.serverTimestamp(),
     });
     tx.update(snap.ref, { status: "completed", completedAt: FieldValue.serverTimestamp() });
+    notify(tx, intent.uid, "Top-Up Complete", `${intent.amount.toFixed(2)} added via ${intent.rail}.`);
   });
 }
 
@@ -574,9 +605,14 @@ export const payoutWebhook = onRequest(async (req, res) => {
   }
 
   if (status === "successful") {
+    const snap = await withdrawalIntentRef(intentId).get();
     await withdrawalIntentRef(intentId)
       .update({ status: "completed", completedAt: FieldValue.serverTimestamp() })
       .catch(() => {});
+    const intent = snap.data() as { uid: string; amount: number; rail: string } | undefined;
+    if (intent) {
+      await notifyDirect(intent.uid, "Withdrawal Sent", `${intent.amount.toFixed(2)} is on its way to ${intent.rail}.`);
+    }
     res.status(200).send("ok");
     return;
   }
@@ -601,6 +637,7 @@ async function refundFailedWithdrawal(intentId: string): Promise<void> {
       createdAt: FieldValue.serverTimestamp(),
     });
     tx.update(snap.ref, { status: "failed", completedAt: FieldValue.serverTimestamp() });
+    notify(tx, intent.uid, "Withdrawal Failed", `${intent.amount.toFixed(2)} to ${intent.rail} didn't go through - it's been refunded to your wallet.`);
   });
 }
 
@@ -620,8 +657,10 @@ export const simulateWithdrawalConfirmation = onCall(async (request) => {
   if (!snap.exists || snap.data()?.uid !== uid) {
     throw new HttpsError("not-found", "Withdrawal not found.");
   }
-  if (snap.data()?.status === "pending") {
+  const intent = snap.data() as { amount: number; rail: string; status: string };
+  if (intent.status === "pending") {
     await snap.ref.update({ status: "completed", completedAt: FieldValue.serverTimestamp() });
+    await notifyDirect(uid, "Withdrawal Sent", `${intent.amount.toFixed(2)} is on its way to ${intent.rail}.`);
   }
 
   return { ok: true };

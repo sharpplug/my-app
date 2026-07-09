@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useAuth } from "@/contexts/auth-provider";
 import { subscribeToUserProfile, type UserProfile } from "@/lib/users";
 import { Skeleton } from "@/components/ui/skeleton";
+import NotificationBell from "@/components/notification-bell";
 
 const VibesMap = dynamic(() => import("@/components/vibes-map"), {
   ssr: false,
@@ -86,6 +87,7 @@ export default function VibeHubPage() {
                    </h1>
                 </Link>
                <div className="flex items-center">
+                    <NotificationBell className="text-white hover:bg-white/10 hover:text-white" />
                     <Link href="/messages" passHref>
                         <Button variant="ghost" size="icon" className="text-white h-9 w-9 flex-shrink-0 hover:bg-white/10 hover:text-white">
                             <MessageSquare />

@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { MessageSquare, Camera } from "lucide-react";
 import { Button } from "../ui/button";
+import NotificationBell from "../notification-bell";
 
 const Logo = (props: React.SVGProps<SVGSVGElement>) => (
     <svg
@@ -38,6 +39,7 @@ export default function Header() {
                </span>
            </h1>
         </Link>
+        <NotificationBell />
     </header>
   );
 }
