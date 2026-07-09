@@ -42,6 +42,17 @@ service cloud.firestore {
       }
     }
 
+    // Pending/completed top-up intents (bringing outside money in via
+    // card, mobile money, or bank - see functions/src/index.ts). Only
+    // initiateTopUp (Admin SDK) creates these and only completeTopUpIntent
+    // (Admin SDK, via topUpWebhook or the demo simulateTopUpConfirmation)
+    // ever changes their status - the client can look up its own intents
+    // to show progress, but never write to them directly.
+    match /topupIntents/{intentId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow write: if false;
+    }
+
     // The Vibes feed. Posts are readable by any signed-in user; only the
     // author can create/delete their own post. Likes/waves are the one
     // exception to "author only" - any signed-in user may flip their own

@@ -21,6 +21,7 @@ import {
     Search,
     CheckCircle2,
     X,
+    CreditCard,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -41,11 +42,13 @@ import {
     subscribeToWallet,
     subscribeToTransactions,
     sendFunds,
-    topUpFunds,
+    initiateTopUp,
+    simulateTopUpConfirmation,
     swapAssets,
     TRANSACTION_FEE_PERCENT,
     MOOOD_TOKEN_RATE,
     type WalletTransaction,
+    type TopUpMethod,
 } from "@/lib/wallet";
 import { findUserByHandle, searchUsersByHandle, type UserProfile } from "@/lib/users";
 import { getDoc, doc } from "firebase/firestore";
@@ -111,6 +114,9 @@ export default function WalletTab() {
 
     const [amount, setAmount] = useState("");
     const [topUpAmount, setTopUpAmount] = useState("");
+    const [selectedRail, setSelectedRail] = useState("");
+    const [topUpPhone, setTopUpPhone] = useState("");
+    const [topUpStage, setTopUpStage] = useState<"form" | "confirming">("form");
     const [swapAmount, setSwapAmount] = useState("");
     const [swapDirection, setSwapDirection] = useState<"cashToToken" | "tokenToCash">("cashToToken");
 
@@ -165,26 +171,55 @@ export default function WalletTab() {
         return isNaN(val) ? "0.00" : (val * TRANSACTION_FEE_PERCENT).toFixed(2);
     }, [amount]);
 
+    // One rail list per region so top-ups can pull in outside money from
+    // whichever local fintech apps are actually relevant there, plus a card
+    // option available everywhere. `method` drives what initiateTopUp needs
+    // (e.g. mobile money rails require a phone number) - see
+    // functions/src/index.ts's RAIL_METHODS for the server-side mirror.
     const regionalPaymentRails = useMemo(() => {
-        const rails = [
-            { name: 'Traditional Bank', icon: Landmark, detail: 'Linked Account', status: 'Synced' },
-        ];
+        const card = { name: 'Debit / Credit Card', method: 'card' as TopUpMethod, icon: CreditCard, detail: 'Visa, Mastercard, Amex', status: 'Link' };
+        const bank = { name: 'Traditional Bank', method: 'bank' as TopUpMethod, icon: Landmark, detail: 'Linked Account', status: 'Synced' };
 
         if (region === 'KE') {
-            rails.unshift({ name: 'M-Pesa', icon: Smartphone, detail: 'Safaricom Wallet', status: 'Synced' });
-            rails.push({ name: 'Airtel Money', icon: Smartphone, detail: 'Not Linked', status: 'Link' });
-        } else if (region === 'UG') {
-            rails.unshift({ name: 'MTN Mobile Money', icon: Smartphone, detail: 'MTN Wallet', status: 'Synced' });
-            rails.push({ name: 'Airtel Money', icon: Smartphone, detail: 'Not Linked', status: 'Link' });
-        } else if (region === 'ZA') {
-            rails.unshift({ name: 'SnapScan', icon: Smartphone, detail: 'ZAR Instant', status: 'Link' });
-            rails.push({ name: 'Ozow EFT', icon: Landmark, detail: 'Direct Bank Pay', status: 'Link' });
-        } else {
-            rails.unshift({ name: 'Wio Bank', icon: Smartphone, detail: 'Digital UAE', status: 'Synced' });
+            return [
+                { name: 'M-Pesa', method: 'mobile_money' as TopUpMethod, icon: Smartphone, detail: 'Safaricom Wallet', status: 'Synced' },
+                { name: 'Airtel Money', method: 'mobile_money' as TopUpMethod, icon: Smartphone, detail: 'Not Linked', status: 'Link' },
+                card, bank,
+            ];
         }
-
-        return rails;
+        if (region === 'UG') {
+            return [
+                { name: 'MTN Mobile Money', method: 'mobile_money' as TopUpMethod, icon: Smartphone, detail: 'MTN Wallet', status: 'Synced' },
+                { name: 'Airtel Money', method: 'mobile_money' as TopUpMethod, icon: Smartphone, detail: 'Not Linked', status: 'Link' },
+                card, bank,
+            ];
+        }
+        if (region === 'ZA') {
+            return [
+                { name: 'SnapScan', method: 'mobile_money' as TopUpMethod, icon: Smartphone, detail: 'ZAR Instant', status: 'Link' },
+                { name: 'Ozow EFT', method: 'bank' as TopUpMethod, icon: Landmark, detail: 'Direct Bank Pay', status: 'Link' },
+                card, bank,
+            ];
+        }
+        // AE (default)
+        return [
+            { name: 'Wio Bank', method: 'bank' as TopUpMethod, icon: Smartphone, detail: 'Digital UAE', status: 'Synced' },
+            card, bank,
+        ];
     }, [region]);
+
+    const selectedRailInfo = useMemo(
+        () => regionalPaymentRails.find(r => r.name === selectedRail) ?? regionalPaymentRails[0],
+        [regionalPaymentRails, selectedRail]
+    );
+
+    const openTopUp = () => {
+        setSelectedRail(regionalPaymentRails[0].name);
+        setTopUpPhone("");
+        setTopUpAmount("");
+        setTopUpStage("form");
+        setIsTopUpOpen(true);
+    };
 
     const resetTransferDialog = () => {
         setIsTransferOpen(false);
@@ -225,14 +260,37 @@ export default function WalletTab() {
             toast({ variant: 'destructive', title: "Invalid Amount" });
             return;
         }
+        if (selectedRailInfo.method === 'mobile_money' && topUpPhone.trim().length < 7) {
+            toast({ variant: 'destructive', title: "Phone Number Required", description: `Enter the number linked to your ${selectedRailInfo.name} account.` });
+            return;
+        }
 
         startTransition(async () => {
             try {
-                await topUpFunds(user.uid, numAmount, regionalPaymentRails[0].name);
+                const { intentId } = await initiateTopUp(
+                    user.uid,
+                    numAmount,
+                    selectedRailInfo.name,
+                    selectedRailInfo.method === 'mobile_money' ? topUpPhone : undefined
+                );
+                setTopUpStage("confirming");
+
+                // Demo stand-in: no live payment aggregator account exists yet
+                // (see functions/src/index.ts), so there's no real webhook to
+                // wait on. This simulates the provider confirming the charge
+                // after the user "approves" it, so the flow can be demoed
+                // end-to-end. Swap for a real redirect/poll once a live
+                // provider is wired to topUpWebhook.
+                await new Promise((resolve) => setTimeout(resolve, 2200));
+                await simulateTopUpConfirmation(intentId);
+
                 setIsTopUpOpen(false);
+                setTopUpStage("form");
                 setTopUpAmount("");
-                toast({ title: "Top Up Successful!", description: `Added ${currency.symbol} ${numAmount.toFixed(2)} via ${regionalPaymentRails[0].name}.` });
+                setTopUpPhone("");
+                toast({ title: "Top Up Successful!", description: `Added ${currency.symbol} ${numAmount.toFixed(2)} via ${selectedRailInfo.name}.` });
             } catch (err) {
+                setTopUpStage("form");
                 toast({ variant: 'destructive', title: "Top Up Failed", description: err instanceof Error ? err.message : "Please try again." });
             }
         });
@@ -292,7 +350,7 @@ export default function WalletTab() {
                         <Button variant="secondary" className="w-full bg-white/10 hover:bg-white/20 text-white border-0" onClick={() => setIsTransferOpen(true)} disabled={!isWalletReady}>
                             <ArrowUpRight className="w-4 h-4 mr-2" /> Send
                         </Button>
-                        <Button variant="secondary" className="w-full bg-white/10 hover:bg-white/20 text-white border-0" onClick={() => setIsTopUpOpen(true)} disabled={!isWalletReady}>
+                        <Button variant="secondary" className="w-full bg-white/10 hover:bg-white/20 text-white border-0" onClick={openTopUp} disabled={!isWalletReady}>
                             <Plus className="w-4 h-4 mr-2" /> Top Up
                         </Button>
                     </CardFooter>
@@ -431,23 +489,66 @@ export default function WalletTab() {
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={isTopUpOpen} onOpenChange={setIsTopUpOpen}>
+            <Dialog open={isTopUpOpen} onOpenChange={(open) => { if (!open && topUpStage === 'form') setIsTopUpOpen(false); }}>
                 <DialogContent className="max-w-md sm:rounded-[2rem] border-white/10 bg-zinc-950 text-white">
                     <DialogHeader>
                         <DialogTitle className="font-headline text-2xl">Top Up Balance</DialogTitle>
-                        <DialogDescription className="text-zinc-400">Add funds via {regionalPaymentRails[0].name}.</DialogDescription>
+                        <DialogDescription className="text-zinc-400">Bring in money from a local mobile money account, card, or bank.</DialogDescription>
                     </DialogHeader>
-                    <div className="space-y-6 py-6">
-                        <div className="space-y-2">
-                            <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">Amount ({currency.symbol})</Label>
-                            <Input type="number" placeholder="0.00" className="bg-white/5 border-white/10 h-14 text-2xl font-bold rounded-xl" value={topUpAmount} onChange={e => setTopUpAmount(e.target.value)} />
+                    {topUpStage === 'form' ? (
+                        <>
+                            <div className="space-y-6 py-6">
+                                <div className="space-y-2">
+                                    <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">Pay With</Label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {regionalPaymentRails.map(rail => (
+                                            <button
+                                                key={rail.name}
+                                                type="button"
+                                                onClick={() => setSelectedRail(rail.name)}
+                                                className={cn(
+                                                    "flex items-center gap-2 p-3 rounded-xl border text-left transition-colors",
+                                                    selectedRail === rail.name ? "border-primary bg-primary/10" : "border-white/10 bg-white/5 hover:border-white/20"
+                                                )}
+                                            >
+                                                <rail.icon className="w-4 h-4 shrink-0" />
+                                                <span className="text-xs font-bold leading-tight">{rail.name}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">Amount ({currency.symbol})</Label>
+                                    <Input type="number" placeholder="0.00" className="bg-white/5 border-white/10 h-14 text-2xl font-bold rounded-xl" value={topUpAmount} onChange={e => setTopUpAmount(e.target.value)} />
+                                </div>
+                                {selectedRailInfo.method === 'mobile_money' && (
+                                    <div className="space-y-2">
+                                        <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">{selectedRailInfo.name} Phone Number</Label>
+                                        <Input type="tel" placeholder="e.g. 07XX XXX XXX" className="bg-white/5 border-white/10 h-12 rounded-xl" value={topUpPhone} onChange={e => setTopUpPhone(e.target.value)} />
+                                    </div>
+                                )}
+                            </div>
+                            <DialogFooter>
+                                <Button className="w-full h-14 text-lg font-bold rounded-xl" onClick={handleTopUp} disabled={isPending || !topUpAmount}>
+                                    {isPending ? <Loader2 className="animate-spin mr-2"/> : <ArrowDownLeft className="mr-2"/>} Continue with {selectedRailInfo.name}
+                                </Button>
+                            </DialogFooter>
+                        </>
+                    ) : (
+                        <div className="py-10 flex flex-col items-center text-center gap-4">
+                            <Loader2 className="w-10 h-10 animate-spin text-primary" />
+                            <div className="space-y-1.5">
+                                <p className="font-bold leading-snug">
+                                    {selectedRailInfo.method === 'mobile_money'
+                                        ? `Approve the ${selectedRailInfo.name} prompt on your phone`
+                                        : selectedRailInfo.method === 'card'
+                                        ? 'Confirming your card payment...'
+                                        : 'Confirming with your bank...'}
+                                </p>
+                                <p className="text-xs text-zinc-400">{currency.symbol} {parseFloat(topUpAmount || "0").toFixed(2)} via {selectedRailInfo.name}</p>
+                            </div>
                         </div>
-                    </div>
-                    <DialogFooter>
-                        <Button className="w-full h-14 text-lg font-bold rounded-xl" onClick={handleTopUp} disabled={isPending || !topUpAmount}>
-                            {isPending ? <Loader2 className="animate-spin mr-2"/> : <ArrowDownLeft className="mr-2"/>} Confirm Top Up
-                        </Button>
-                    </DialogFooter>
+                    )}
                 </DialogContent>
             </Dialog>
 

@@ -37,6 +37,9 @@ export type WalletTransaction = {
   createdAt: Timestamp | null;
 };
 
+/** How a top-up rail settles - drives which fields the UI collects. */
+export type TopUpMethod = "mobile_money" | "card" | "bank";
+
 const walletRef = (uid: string) => doc(firestore, "wallets", uid);
 const transactionsRef = (uid: string) =>
   collection(firestore, "wallets", uid, "transactions");
@@ -101,9 +104,26 @@ export async function spendFunds(uid: string, item: string, amount: number) {
   await call({ item, amount });
 }
 
-export async function topUpFunds(uid: string, amount: number, rail: string) {
-  const call = httpsCallable(functions, "topUpFunds");
-  await call({ amount, rail });
+// Top-ups are a two-step flow rather than a single trusted call, since this
+// is the one place outside money enters the system. initiateTopUp opens a
+// pending intent server-side (functions/src/index.ts); the wallet is only
+// credited once that intent is confirmed, either by a real payment
+// provider's webhook (production) or, until a live aggregator account
+// exists, simulateTopUpConfirmation (demo stand-in - see its own comment).
+export async function initiateTopUp(
+  uid: string,
+  amount: number,
+  rail: string,
+  phone?: string
+): Promise<{ intentId: string; method: TopUpMethod }> {
+  const call = httpsCallable(functions, "initiateTopUp");
+  const result = await call({ amount, rail, phone });
+  return result.data as { intentId: string; method: TopUpMethod };
+}
+
+export async function simulateTopUpConfirmation(intentId: string): Promise<void> {
+  const call = httpsCallable(functions, "simulateTopUpConfirmation");
+  await call({ intentId });
 }
 
 export async function swapAssets(
