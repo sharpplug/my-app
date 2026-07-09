@@ -103,6 +103,47 @@ service cloud.firestore {
       allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
     }
 
+    // Real host-listed stays (Partner Dashboard's "Become a Host" flow) -
+    // same trust model as products: listing is a free client write gated
+    // on being a partner and setting a real price, booking one (spendFunds
+    // with a stayId) is Cloud-Function-only since that's what moves money.
+    match /stays/{stayId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.pricePerNight is number
+        && request.resource.data.pricePerNight > 0
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'partner';
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.hostUid;
+    }
+
+    // Real partner-created events (Partner Dashboard's "Create Event" flow)
+    // - same trust model again. priceValue of 0 is allowed (free events).
+    match /events/{eventId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.organizerUid == request.auth.uid
+        && request.resource.data.priceValue is number
+        && request.resource.data.priceValue >= 0
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'partner';
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.organizerUid;
+    }
+
+    // Skip Driver Console registrations (Partner Dashboard). One profile
+    // per driver, doc ID == their own uid, so "can only write your own" is
+    // just an ID match rather than an ownerUid field check. Read is open
+    // to any signed-in user since Skip needs to know which regions/
+    // services have active drivers before a ride is ever booked; the
+    // actual match-and-pay happens server-side in spendFunds regardless of
+    // what a client believes it read here.
+    match /drivers/{uid} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.ownerUid == uid
+        && get(/databases/$(database)/documents/users/$(uid)).data.role == 'partner';
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
     // The Vibes feed. Posts are readable by any signed-in user; only the
     // author can create/delete their own post. Likes/waves are the one
     // exception to "author only" - any signed-in user may flip their own

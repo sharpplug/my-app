@@ -165,7 +165,7 @@ const CheckoutDialog = ({ open, onOpenChange, item }: { open: boolean, onOpenCha
         if (!user) return;
         setIsPending(true);
         try {
-            await spendFunds(user.uid, item.title, item.price, item.productId);
+            await spendFunds(user.uid, item.title, item.price, { productId: item.productId });
             toast({ title: "Order Confirmed!", description: `${currency.symbol} ${item.price} paid from your Moood wallet.` });
             onOpenChange(false);
         } catch (err) {

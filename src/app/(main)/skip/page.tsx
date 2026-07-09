@@ -50,22 +50,27 @@ import { useAuth } from '@/contexts/auth-provider';
 import { spendFunds } from '@/lib/wallet';
 import dynamic from 'next/dynamic';
 import { Skeleton } from '@/components/ui/skeleton';
+import { REGION_CENTERS } from '@/lib/catalog-data';
 
 const StaticMap = dynamic(() => import('@/components/static-map'), {
   ssr: false,
   loading: () => <Skeleton className="w-full h-full bg-muted" />,
 });
 
-const REGION_CENTERS: Record<string, { lat: number; lng: number }> = {
-  AE: { lat: 25.2048, lng: 55.2708 },
-  KE: { lat: -1.2921, lng: 36.8219 },
-  UG: { lat: 0.3476, lng: 32.5825 },
-  ZA: { lat: -26.2041, lng: 28.0473 },
-};
 
 type RideStep = 'initial' | 'vehicles' | 'searching' | 'confirmed' | 'tracking' | 'itinerary' | 'payment';
-type RideType = 'personal' | 'courier';
+type RideType = 'personal' | 'courier' | 'tow';
 type RideOption = { id: string; name: string; icon: React.ElementType; eta: string; price: number; description: string; premium?: boolean };
+
+// Maps each Skip tab to the service type a registered driver picks in the
+// Partner Dashboard's Driver Console (src/lib/drivers.ts) - this is what
+// lets spendFunds match a real driver in the rider's region instead of the
+// fare just going to the platform.
+const SERVICE_TYPE_BY_TAB: Record<RideType, 'taxi' | 'courier' | 'tow'> = {
+  personal: 'taxi',
+  courier: 'courier',
+  tow: 'tow',
+};
 
 const personalRideOptions: RideOption[] = [
   { id: 'boda', name: 'Boda Boda', icon: Bike, eta: '2 min', price: 12, description: 'Fastest city motorcycle taxi' },
@@ -83,6 +88,12 @@ const courierRideOptions: RideOption[] = [
     { id: 'c-bus', name: 'Regional Bus', icon: Bus, eta: 'Scheduled', price: 350, description: 'Heavy & bulk regional transport' },
 ];
 
+const towRideOptions: RideOption[] = [
+    { id: 't-roadside', name: 'Roadside Assist', icon: Shield, eta: '15 min', price: 80, description: 'Jump start, flat tire, lockout' },
+    { id: 't-flatbed', name: 'Flatbed Tow', icon: Truck, eta: '25 min', price: 220, description: 'Full vehicle tow to a garage' },
+    { id: 't-heavy', name: 'Heavy Recovery', icon: Truck, eta: 'Scheduled', price: 500, description: 'Trucks, vans & off-road recovery', premium: true },
+];
+
 const aiSuggestions = ["Work in Downtown", "Airport Transfer", "Mall of the Emirates", "Beach Gathering"];
 
 const InitialStep = ({
@@ -94,9 +105,10 @@ const InitialStep = ({
 }) => (
     <div className="space-y-6 pb-4">
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as RideType)} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 rounded-2xl p-1.5 h-auto bg-muted">
-          <TabsTrigger value="personal" className="rounded-xl py-2.5 font-bold transition-all">SKIP</TabsTrigger>
-          <TabsTrigger value="courier" className="rounded-xl py-2.5 font-bold transition-all">COURIER</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-3 rounded-2xl p-1.5 h-auto bg-muted">
+          <TabsTrigger value="personal" className="rounded-xl py-2.5 font-bold transition-all text-xs sm:text-sm">SKIP</TabsTrigger>
+          <TabsTrigger value="courier" className="rounded-xl py-2.5 font-bold transition-all text-xs sm:text-sm">COURIER</TabsTrigger>
+          <TabsTrigger value="tow" className="rounded-xl py-2.5 font-bold transition-all text-xs sm:text-sm">TOW</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -243,11 +255,12 @@ export default function SkipPage() {
   const [destination, setDestination] = useState('');
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [safetyMessage, setSafetyMessage] = useState<string | null>(null);
+  const [matchedDriver, setMatchedDriver] = useState<{ uid: string; handle: string; name: string } | null>(null);
   const { toast } = useToast();
   const { currency, region } = useRegional();
   const { user } = useAuth();
 
-  const rideOptions = activeTab === 'personal' ? personalRideOptions : courierRideOptions;
+  const rideOptions = activeTab === 'personal' ? personalRideOptions : activeTab === 'courier' ? courierRideOptions : towRideOptions;
 
   // Deep-linked from the Vibes Map's "Get a ride here" action on a friend's
   // live location (see vibes-map.tsx) - jumps straight to vehicle selection
@@ -294,7 +307,8 @@ export default function SkipPage() {
       if (!user) return;
       setIsPaying(true);
       try {
-          await spendFunds(user.uid, title, fare);
+          const result = await spendFunds(user.uid, title, fare, { rideService: { region, serviceType: 'taxi' } });
+          setMatchedDriver(result.driver ?? null);
           setItinerary(null);
           setCalendarPlan(null);
           setStep('searching');
@@ -311,7 +325,7 @@ export default function SkipPage() {
       setIsCheckingIn(true);
       try {
           const idToken = await getIdToken();
-          const result = await aiSafetyCheckIn(idToken, { rideDetails: `Riding with Hassan M. in a ${selectedRide.name}, currently near Downtown, heading to the destination.` });
+          const result = await aiSafetyCheckIn(idToken, { rideDetails: `Riding with ${matchedDriver?.name ?? 'Hassan M.'} in a ${selectedRide.name}, currently near Downtown, heading to the destination.` });
           setSafetyMessage(result.statusMessage);
       } catch (err) {
           toast({ variant: 'destructive', title: "Couldn't generate check-in", description: err instanceof Error ? err.message : "Please try again." });
@@ -330,7 +344,12 @@ export default function SkipPage() {
       setIsPaying(true);
       try {
           if (method === 'wallet') {
-              await spendFunds(user.uid, `${selectedRide.name} ride`, selectedRide.price);
+              const result = await spendFunds(user.uid, `${selectedRide.name} ride`, selectedRide.price, {
+                  rideService: { region, serviceType: SERVICE_TYPE_BY_TAB[activeTab] },
+              });
+              setMatchedDriver(result.driver ?? null);
+          } else {
+              setMatchedDriver(null);
           }
           setStep('searching');
           setTimeout(() => setStep('confirmed'), 1000);
@@ -344,7 +363,7 @@ export default function SkipPage() {
   const sheetTitle = useMemo(() => {
     if (isPlanning) return 'Naya AI Designing Expedition...';
     switch (step) {
-      case 'initial': return activeTab === 'personal' ? 'Where to?' : 'Send Anything';
+      case 'initial': return activeTab === 'personal' ? 'Where to?' : activeTab === 'courier' ? 'Send Anything' : 'Need a Tow?';
       case 'vehicles': return 'Choose your Experience';
       case 'payment': return 'Secure Payment';
       case 'searching': return 'Searching Regional Fleet';
@@ -371,7 +390,7 @@ export default function SkipPage() {
         <div className="absolute top-6 left-6 right-6 z-20 flex items-center justify-between pointer-events-none">
             <div className="flex flex-col gap-1">
                 <Badge className="px-4 py-1.5 rounded-full font-black tracking-widest text-[10px] bg-primary text-white shadow-xl pointer-events-auto">
-                    {activeTab === 'personal' ? 'SKIP RIDE' : 'SKIP COURIER'}
+                    {activeTab === 'personal' ? 'SKIP RIDE' : activeTab === 'courier' ? 'SKIP COURIER' : 'SKIP TOW'}
                 </Badge>
                 {step === 'tracking' && <Badge variant="secondary" className="bg-black/40 text-green-400 backdrop-blur-md border-0 pointer-events-auto"><ShieldCheck className="w-3 h-3 mr-1"/> ENCRYPTED TRIP</Badge>}
             </div>
@@ -440,13 +459,13 @@ export default function SkipPage() {
                                       <AvatarFallback>D</AvatarFallback>
                                   </Avatar>
                                   <div className="flex-1 space-y-1">
-                                      <p className="text-2xl font-black leading-tight tracking-tight uppercase">Hassan M.</p>
+                                      <p className="text-2xl font-black leading-tight tracking-tight uppercase">{matchedDriver?.name ?? 'Hassan M.'}</p>
                                       <div className="flex items-center gap-2">
                                           <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                                          <span className="text-sm font-bold">4.9 • 1,240 Trips</span>
+                                          <span className="text-sm font-bold">{matchedDriver ? `@${matchedDriver.handle}` : '4.9 • 1,240 Trips'}</span>
                                       </div>
                                   </div>
-                                  <Button size="icon" variant="outline" className="h-12 w-12 rounded-full border-green-500/20 bg-green-500/5 text-green-600" onClick={() => setActiveCallTarget({ name: 'Hassan M.', type: 'user' })}>
+                                  <Button size="icon" variant="outline" className="h-12 w-12 rounded-full border-green-500/20 bg-green-500/5 text-green-600" onClick={() => setActiveCallTarget({ name: matchedDriver?.name ?? 'Hassan M.', type: 'user' })}>
                                       <Phone className="w-5 h-5" />
                                   </Button>
                               </div>
@@ -467,7 +486,7 @@ export default function SkipPage() {
                                   <p className="text-sm font-bold">Arriving in <span className="text-primary">3 minutes</span></p>
                               </div>
                               <div className="flex gap-2">
-                                  <Button size="icon" variant="outline" className="rounded-full h-10 w-10" onClick={() => setActiveCallTarget({ name: 'Hassan M.', type: 'user' })}><Phone className="w-4 h-4 text-green-600" /></Button>
+                                  <Button size="icon" variant="outline" className="rounded-full h-10 w-10" onClick={() => setActiveCallTarget({ name: matchedDriver?.name ?? 'Hassan M.', type: 'user' })}><Phone className="w-4 h-4 text-green-600" /></Button>
                                   <Button size="icon" variant="outline" className="rounded-full h-10 w-10"><MessageSquare className="w-4 h-4" /></Button>
                               </div>
                           </div>
@@ -490,7 +509,7 @@ export default function SkipPage() {
                                   {isCheckingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />} Naya Safety Check-In
                               </Button>
                           )}
-                          <Button variant="outline" className="w-full h-14 rounded-2xl font-bold border-red-500/20 text-red-500" onClick={() => { setStep('initial'); setSelectedRide(null); setSafetyMessage(null); }}>CANCEL TRIP</Button>
+                          <Button variant="outline" className="w-full h-14 rounded-2xl font-bold border-red-500/20 text-red-500" onClick={() => { setStep('initial'); setSelectedRide(null); setSafetyMessage(null); setMatchedDriver(null); }}>CANCEL TRIP</Button>
                       </div>
                   ) : step === 'itinerary' ? (
                       itinerary ? (

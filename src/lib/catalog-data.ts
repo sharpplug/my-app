@@ -2,6 +2,16 @@
 // components so it can also be imported by GlobalSearchDialog without
 // importing a page.tsx module as a library.
 
+/** Rough city-center coordinates per region, used as a default map pin for
+ * anything a user creates (a stay listing, an event) without picking an
+ * exact location, and by Skip for its background map. */
+export const REGION_CENTERS: Record<string, { lat: number; lng: number }> = {
+  AE: { lat: 25.2048, lng: 55.2708 },
+  KE: { lat: -1.2921, lng: 36.8219 },
+  UG: { lat: 0.3476, lng: 32.5825 },
+  ZA: { lat: -26.2041, lng: 28.0473 },
+};
+
 export type MoodEvent = {
   id: number;
   title: string;

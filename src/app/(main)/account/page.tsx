@@ -36,6 +36,7 @@ import {
     Trash2,
     Sparkles,
     Loader2,
+    Calendar,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -58,7 +59,12 @@ import { cn } from "@/lib/utils";
 import { subscribeToUserProfile, becomePartner, type UserProfile } from "@/lib/users";
 import { subscribeToTransactions, type WalletTransaction } from "@/lib/wallet";
 import { subscribeToMyProducts, deleteProduct, type Product as ProductType } from "@/lib/products";
+import { subscribeToMyStays, deleteStay, type HostedStay } from "@/lib/stays";
+import { subscribeToMyEvents, deleteEvent, type HostedEvent } from "@/lib/events";
 import CreateListingDialog from "@/components/create-listing-dialog";
+import CreateStayDialog from "@/components/create-stay-dialog";
+import CreateEventDialog from "@/components/create-event-dialog";
+import DriverConsoleCard from "@/components/driver-console-card";
 import { aiCareerCoach } from "@/app/actions";
 import { getIdToken } from "@/lib/get-id-token";
 
@@ -282,7 +288,11 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
     const { toast } = useToast();
     const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
     const [myProducts, setMyProducts] = useState<ProductType[]>([]);
-    const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const [myStays, setMyStays] = useState<HostedStay[]>([]);
+    const [myEvents, setMyEvents] = useState<HostedEvent[]>([]);
+    const [isCreateProductOpen, setIsCreateProductOpen] = useState(false);
+    const [isCreateStayOpen, setIsCreateStayOpen] = useState(false);
+    const [isCreateEventOpen, setIsCreateEventOpen] = useState(false);
 
     useEffect(() => {
         if (!user) return;
@@ -294,18 +304,29 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
         return subscribeToMyProducts(user.uid, setMyProducts);
     }, [user]);
 
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToMyStays(user.uid, setMyStays);
+    }, [user]);
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToMyEvents(user.uid, setMyEvents);
+    }, [user]);
+
     // Real numbers pulled from the partner's own wallet transaction history
-    // (Cloud-Function-recorded, not a hardcoded display value) - marketplace
-    // sales come from spendFunds crediting a product's ownerUid, gifting
-    // comes from sendGift's streamer share. Limited to the last 20
-    // transactions (subscribeToTransactions' cap), so this is "recent
-    // earnings" rather than lifetime - a real dashboard would aggregate
-    // server-side instead of scanning a capped client feed.
+    // (Cloud-Function-recorded, not a hardcoded display value): 'sale'
+    // covers products/stays/events (spendFunds crediting the listing's
+    // owner), 'driver-earning' covers Skip rides/deliveries/tow jobs, and
+    // 'gift-received' is a streamer's share of live gifting. Limited to the
+    // last 20 transactions (subscribeToTransactions' cap), so this is
+    // "recent earnings" rather than lifetime - a real dashboard would
+    // aggregate server-side instead of scanning a capped client feed.
     const marketplaceSales = useMemo(() => transactions.filter(tx => tx.type === 'sale').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
+    const drivingIncome = useMemo(() => transactions.filter(tx => tx.type === 'driver-earning').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
     const liveGifting = useMemo(() => transactions.filter(tx => tx.type === 'gift-received').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
-    const totalEarnings = marketplaceSales + liveGifting;
-    const marketplacePct = totalEarnings > 0 ? Math.round((marketplaceSales / totalEarnings) * 100) : 0;
-    const giftingPct = totalEarnings > 0 ? 100 - marketplacePct : 0;
+    const totalEarnings = marketplaceSales + drivingIncome + liveGifting;
+    const pct = (n: number) => (totalEarnings > 0 ? Math.round((n / totalEarnings) * 100) : 0);
 
     const handleDeleteListing = async (productId: string) => {
         try {
@@ -313,6 +334,24 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
             toast({ title: "Listing Removed" });
         } catch (err) {
             toast({ variant: 'destructive', title: "Couldn't remove listing", description: err instanceof Error ? err.message : "Please try again." });
+        }
+    };
+
+    const handleDeleteStay = async (stayId: string) => {
+        try {
+            await deleteStay(stayId);
+            toast({ title: "Listing Removed" });
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Couldn't remove listing", description: err instanceof Error ? err.message : "Please try again." });
+        }
+    };
+
+    const handleDeleteEvent = async (eventId: string) => {
+        try {
+            await deleteEvent(eventId);
+            toast({ title: "Event Removed" });
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Couldn't remove event", description: err instanceof Error ? err.message : "Please try again." });
         }
     };
 
@@ -333,16 +372,18 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
                         <CardTitle className="text-[10px] uppercase tracking-tighter opacity-50 flex items-center gap-1.5"><Box className="w-3 h-3"/> Active Listings</CardTitle>
                     </CardHeader>
                     <CardContent className="p-4 pt-2">
-                        <p className="text-2xl font-bold font-headline tracking-tighter">{myProducts.length}</p>
-                        <Badge className="bg-primary/20 text-primary border-0 mt-1 text-[8px]">Live on Marketplace</Badge>
+                        <p className="text-2xl font-bold font-headline tracking-tighter">{myProducts.length + myStays.length + myEvents.length}</p>
+                        <Badge className="bg-primary/20 text-primary border-0 mt-1 text-[8px]">Products, Stays & Events</Badge>
                     </CardContent>
                 </Card>
             </div>
 
+            <DriverConsoleCard profile={profile} />
+
             <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
                 <CardHeader>
-                    <CardTitle className="text-lg font-headline flex items-center gap-2"><LayoutDashboard className="w-5 h-5 text-primary"/> Business Center</CardTitle>
-                    <CardDescription>Scale your operations in the Global South.</CardDescription>
+                    <CardTitle className="text-lg font-headline flex items-center gap-2"><LayoutDashboard className="w-5 h-5 text-primary"/> Marketplace Listings</CardTitle>
+                    <CardDescription>Sell products on Shop, just like anyone else offering a service.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="p-4 rounded-2xl bg-background/50 border border-white/5 flex items-center justify-between">
@@ -373,7 +414,65 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
                     )}
                 </CardContent>
                 <CardFooter>
-                    <Button className="w-full rounded-xl gap-2 h-14 font-bold text-lg shadow-xl shadow-primary/20" onClick={() => setIsCreateOpen(true)}><Plus className="w-5 h-5"/> Create New Listing</Button>
+                    <Button className="w-full rounded-xl gap-2 h-14 font-bold text-lg shadow-xl shadow-primary/20" onClick={() => setIsCreateProductOpen(true)}><Plus className="w-5 h-5"/> Create New Listing</Button>
+                </CardFooter>
+            </Card>
+
+            <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
+                <CardHeader>
+                    <CardTitle className="text-lg font-headline flex items-center gap-2"><Box className="w-5 h-5 text-primary"/> Become a Host</CardTitle>
+                    <CardDescription>List a place on Stays - guests book and pay straight into your wallet.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                    {myStays.length === 0 ? (
+                        <div className="p-4 rounded-2xl bg-background/50 border border-white/5 text-center">
+                            <p className="text-sm font-bold">No places listed yet</p>
+                            <p className="text-[10px] text-muted-foreground mt-1">List your first stay below - it shows up on Links &gt; Stays immediately.</p>
+                        </div>
+                    ) : (
+                        myStays.map((stay) => (
+                            <div key={stay.id} className="p-3 rounded-2xl bg-background/50 border border-white/5 flex items-center gap-3">
+                                <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-muted"><Image src={stay.images[0]} alt={stay.title} fill className="object-cover" /></div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-bold text-sm truncate">{stay.title}</p>
+                                    <p className="text-[10px] text-muted-foreground">{currency.symbol} {stay.pricePerNight} / night</p>
+                                </div>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive shrink-0" onClick={() => handleDeleteStay(stay.id)}><Trash2 className="w-4 h-4" /></Button>
+                            </div>
+                        ))
+                    )}
+                </CardContent>
+                <CardFooter>
+                    <Button className="w-full rounded-xl gap-2 h-14 font-bold text-lg shadow-xl shadow-primary/20" onClick={() => setIsCreateStayOpen(true)}><Plus className="w-5 h-5"/> Become a Host</Button>
+                </CardFooter>
+            </Card>
+
+            <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
+                <CardHeader>
+                    <CardTitle className="text-lg font-headline flex items-center gap-2"><Calendar className="w-5 h-5 text-primary"/> Your Events</CardTitle>
+                    <CardDescription>Sell tickets on Links - paid events pay straight into your wallet.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                    {myEvents.length === 0 ? (
+                        <div className="p-4 rounded-2xl bg-background/50 border border-white/5 text-center">
+                            <p className="text-sm font-bold">No events yet</p>
+                            <p className="text-[10px] text-muted-foreground mt-1">Create your first event below - it shows up on Links immediately.</p>
+                        </div>
+                    ) : (
+                        myEvents.map((eventItem) => (
+                            <div key={eventItem.id} className="p-3 rounded-2xl bg-background/50 border border-white/5 flex items-center gap-3">
+                                <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-muted"><Image src={eventItem.image} alt={eventItem.title} fill className="object-cover" /></div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-bold text-sm truncate">{eventItem.title}</p>
+                                    <p className="text-[10px] text-muted-foreground">{eventItem.priceValue === 0 ? "Free" : `${currency.symbol} ${eventItem.priceValue}`}</p>
+                                </div>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive shrink-0" onClick={() => handleDeleteEvent(eventItem.id)}><Trash2 className="w-4 h-4" /></Button>
+                            </div>
+                        ))
+                    )}
+                </CardContent>
+                <CardFooter>
+                    <Button className="w-full rounded-xl gap-2 h-14 font-bold text-lg shadow-xl shadow-primary/20" onClick={() => setIsCreateEventOpen(true)}><Plus className="w-5 h-5"/> Create Event</Button>
                 </CardFooter>
             </Card>
 
@@ -386,17 +485,24 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
                     <div className="flex items-center gap-2 p-4 border-b border-white/5">
                         <div className="w-2 h-2 rounded-full bg-primary" />
                         <span className="text-xs flex-1">Marketplace Sales</span>
-                        <span className="text-xs font-bold tabular-nums">{marketplacePct}%</span>
+                        <span className="text-xs font-bold tabular-nums">{pct(marketplaceSales)}%</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-4 border-b border-white/5">
+                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                        <span className="text-xs flex-1">Driving & Delivery</span>
+                        <span className="text-xs font-bold tabular-nums">{pct(drivingIncome)}%</span>
                     </div>
                     <div className="flex items-center gap-2 p-4">
                         <div className="w-2 h-2 rounded-full bg-amber-500" />
                         <span className="text-xs flex-1">Live Gifting</span>
-                        <span className="text-xs font-bold tabular-nums">{giftingPct}%</span>
+                        <span className="text-xs font-bold tabular-nums">{pct(liveGifting)}%</span>
                     </div>
                 </CardContent>
             </Card>
 
-            <CreateListingDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} profile={profile} />
+            <CreateListingDialog open={isCreateProductOpen} onOpenChange={setIsCreateProductOpen} profile={profile} />
+            <CreateStayDialog open={isCreateStayOpen} onOpenChange={setIsCreateStayOpen} profile={profile} />
+            <CreateEventDialog open={isCreateEventOpen} onOpenChange={setIsCreateEventOpen} profile={profile} />
         </div>
     );
 };

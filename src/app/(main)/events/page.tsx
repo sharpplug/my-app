@@ -13,16 +13,48 @@ import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/auth-provider";
+import { useRegional } from "@/contexts/language-provider";
 import { spendFunds } from "@/lib/wallet";
 import dynamic from "next/dynamic";
 import { Skeleton } from "@/components/ui/skeleton";
 import StaysMarketplace from "@/components/stays-marketplace";
-import { mockEvents, type MoodEvent } from "@/lib/catalog-data";
+import { mockEvents, type MoodEvent as BaseMoodEvent } from "@/lib/catalog-data";
+import { subscribeToEvents, type HostedEvent } from "@/lib/events";
 
 const StaticMap = dynamic(() => import("@/components/static-map"), {
   ssr: false,
   loading: () => <Skeleton className="w-full h-full bg-muted" />,
 });
+
+type MoodEvent = Omit<BaseMoodEvent, "id"> & {
+  id: string | number;
+  /** Set only for real, partner-created events (src/lib/events.ts) - drives
+   * server-side crediting in spendFunds and the "can't book your own
+   * event" guard, same pattern as Shop's productId. */
+  eventId?: string;
+  organizerUid?: string;
+  organizerHandle?: string;
+};
+
+function hostedEventToDisplay(event: HostedEvent, currencySymbol: string): MoodEvent {
+  return {
+    id: event.id,
+    title: event.title,
+    date: event.date,
+    location: event.location,
+    price: event.priceValue === 0 ? "Free Entry" : `${currencySymbol} ${event.priceValue}`,
+    priceValue: event.priceValue,
+    category: event.category,
+    badge: event.badge || "Mixed",
+    image: event.image,
+    hint: event.title,
+    lat: event.lat,
+    lng: event.lng,
+    eventId: event.id,
+    organizerUid: event.organizerUid,
+    organizerHandle: event.organizerHandle,
+  };
+}
 
 const BookingDialog = ({ event, open, onOpenChange }: { event: MoodEvent | null; open: boolean; onOpenChange: (open: boolean) => void }) => {
   const { toast } = useToast();
@@ -31,13 +63,14 @@ const BookingDialog = ({ event, open, onOpenChange }: { event: MoodEvent | null;
 
   if (!event) return null;
   const isFree = event.priceValue === 0;
+  const isOwnEvent = !!event.eventId && event.organizerUid === user?.uid;
 
   const handleBook = async () => {
     if (!user) return;
     setIsPending(true);
     try {
       if (!isFree) {
-        await spendFunds(user.uid, event.title, event.priceValue);
+        await spendFunds(user.uid, event.title, event.priceValue, event.eventId ? { eventId: event.eventId } : undefined);
       }
       toast({ title: isFree ? "Spot Reserved!" : "Ticket Booked!", description: `You're set for "${event.title}".` });
       onOpenChange(false);
@@ -67,9 +100,9 @@ const BookingDialog = ({ event, open, onOpenChange }: { event: MoodEvent | null;
             <span className="text-xl font-black text-primary">{event.price}</span>
           </div>
         </div>
-        <Button className="w-full h-14 rounded-xl text-lg font-bold" onClick={handleBook} disabled={isPending}>
+        <Button className="w-full h-14 rounded-xl text-lg font-bold" onClick={handleBook} disabled={isPending || isOwnEvent}>
           {isPending ? <Loader2 className="animate-spin mr-2 w-4 h-4" /> : <Ticket className="mr-2 w-4 h-4" />}
-          {isFree ? "Reserve Free Spot" : `Pay ${event.price}`}
+          {isOwnEvent ? "This Is Your Event" : isFree ? "Reserve Free Spot" : `Pay ${event.price}`}
         </Button>
       </DialogContent>
     </Dialog>
@@ -98,6 +131,7 @@ const EventCard = ({ event, onBook }: { event: MoodEvent; onBook: (event: MoodEv
         <Badge variant={getBadgeVariant(event.badge)} className="absolute top-3 right-3">
           {event.badge}
         </Badge>
+        {event.eventId && <Badge variant="secondary" className="absolute top-3 left-3">By @{event.organizerHandle}</Badge>}
       </div>
       <CardHeader>
         <CardTitle className="font-headline text-xl">{event.title}</CardTitle>
@@ -130,21 +164,30 @@ const EventCard = ({ event, onBook }: { event: MoodEvent; onBook: (event: MoodEv
 
 export default function LinksPage() {
     const searchParams = useSearchParams();
+    const { currency } = useRegional();
     const querySearch = searchParams.get('q') || "";
     const [searchTerm, setSearchTerm] = useState(querySearch);
     const [bookingEvent, setBookingEvent] = useState<MoodEvent | null>(null);
     const [activeTab, setActiveTab] = useState<"events" | "stays">(searchParams.get('tab') === 'stays' ? 'stays' : 'events');
+    const [hostedEvents, setHostedEvents] = useState<HostedEvent[]>([]);
+
+    useEffect(() => subscribeToEvents(setHostedEvents), []);
 
     useEffect(() => {
         setSearchTerm(querySearch);
         if (searchParams.get('tab') === 'stays') setActiveTab('stays');
     }, [querySearch, searchParams]);
 
-    const filteredEvents = useMemo(() => mockEvents.filter(event =>
+    const allEvents = useMemo(
+        () => [...hostedEvents.map((e) => hostedEventToDisplay(e, currency.symbol)), ...mockEvents],
+        [hostedEvents, currency.symbol]
+    );
+
+    const filteredEvents = useMemo(() => allEvents.filter(event =>
         event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         event.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
         event.location.toLowerCase().includes(searchTerm.toLowerCase())
-    ), [searchTerm]);
+    ), [allEvents, searchTerm]);
 
     return (
         <div className="w-full p-4 md:p-6 lg:p-8">

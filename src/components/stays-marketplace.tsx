@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth-provider";
 import { useRegional } from "@/contexts/language-provider";
 import { spendFunds } from "@/lib/wallet";
+import { subscribeToStays, type HostedStay } from "@/lib/stays";
 
 const StaticMap = dynamic(() => import("@/components/static-map"), {
   ssr: false,
@@ -28,7 +29,7 @@ const AMENITY_ICONS: Record<string, React.ElementType> = {
 
 export const stays = [
   {
-    id: 1,
+    id: "1",
     title: "Oceanfront Villa in Jumeirah",
     location: "Jumeirah, Dubai",
     type: "Villa",
@@ -46,7 +47,7 @@ export const stays = [
     lat: 25.2048, lng: 55.2708,
   },
   {
-    id: 2,
+    id: "2",
     title: "Marina Skyline Apartment",
     location: "Dubai Marina, Dubai",
     type: "Apartment",
@@ -64,7 +65,7 @@ export const stays = [
     lat: 25.0805, lng: 55.1403,
   },
   {
-    id: 3,
+    id: "3",
     title: "Desert Camp Retreat",
     location: "Al Qudra Desert",
     type: "Glamping",
@@ -82,7 +83,7 @@ export const stays = [
     lat: 24.8834, lng: 55.4033,
   },
   {
-    id: 4,
+    id: "4",
     title: "Nairobi Garden Cottage",
     location: "Karen, Nairobi",
     type: "Cottage",
@@ -100,7 +101,7 @@ export const stays = [
     lat: -1.2921, lng: 36.8219,
   },
   {
-    id: 5,
+    id: "5",
     title: "Kampala City Loft",
     location: "Kololo, Kampala",
     type: "Loft",
@@ -118,7 +119,7 @@ export const stays = [
     lat: 0.3476, lng: 32.5825,
   },
   {
-    id: 6,
+    id: "6",
     title: "Cape Town Cliffside House",
     location: "Camps Bay, Cape Town",
     type: "House",
@@ -137,7 +138,39 @@ export const stays = [
   },
 ];
 
-export type Stay = (typeof stays)[0];
+export type Stay = (typeof stays)[0] & {
+  /** Set only for real, host-listed stays (src/lib/stays.ts) - drives
+   * server-side crediting in spendFunds and the "can't book your own
+   * listing" guard, same pattern as Shop's productId. */
+  stayId?: string;
+  hostUid?: string;
+  hostHandle?: string;
+};
+
+function hostedStayToDisplay(stay: HostedStay): Stay {
+  return {
+    id: stay.id,
+    title: stay.title,
+    location: stay.location,
+    type: stay.type,
+    pricePerNight: stay.pricePerNight,
+    rating: 5,
+    reviews: 0,
+    guests: stay.guests,
+    bedrooms: stay.bedrooms,
+    beds: stay.beds,
+    baths: stay.baths,
+    amenities: stay.amenities,
+    images: stay.images.length > 0 ? stay.images : [`https://picsum.photos/seed/${stay.id}/800/600`],
+    hostName: stay.hostName,
+    hostAvatar: stay.hostAvatar,
+    lat: stay.lat,
+    lng: stay.lng,
+    stayId: stay.id,
+    hostUid: stay.hostUid,
+    hostHandle: stay.hostHandle,
+  };
+}
 
 function nightsBetween(checkIn: string, checkOut: string): number {
   if (!checkIn || !checkOut) return 0;
@@ -164,11 +197,18 @@ const StayDetailDialog = ({ stay, open, onOpenChange }: { stay: Stay | null; ope
   const nights = nightsBetween(checkIn, checkOut);
   const total = nights * stay.pricePerNight;
 
+  const isOwnListing = !!stay.stayId && stay.hostUid === user?.uid;
+
   const handleBook = async () => {
     if (!user || nights <= 0) return;
     setIsPending(true);
     try {
-      await spendFunds(user.uid, `${stay.title} (${nights} night${nights > 1 ? "s" : ""})`, total);
+      await spendFunds(
+        user.uid,
+        `${stay.title} (${nights} night${nights > 1 ? "s" : ""})`,
+        total,
+        stay.stayId ? { stayId: stay.stayId, checkIn, checkOut } : undefined
+      );
       toast({ title: "Stay Booked!", description: `${nights} night${nights > 1 ? "s" : ""} at ${stay.title}, ${checkIn} - ${checkOut}.` });
       onOpenChange(false);
     } catch (err) {
@@ -240,9 +280,9 @@ const StayDetailDialog = ({ stay, open, onOpenChange }: { stay: Stay | null; ope
           </div>
         </div>
 
-        <Button className="w-full h-14 rounded-xl text-lg font-bold" onClick={handleBook} disabled={isPending || nights <= 0}>
+        <Button className="w-full h-14 rounded-xl text-lg font-bold" onClick={handleBook} disabled={isPending || nights <= 0 || isOwnListing}>
           {isPending ? <Loader2 className="animate-spin mr-2 w-4 h-4" /> : null}
-          {nights > 0 ? `Book · ${currency.symbol} ${total.toFixed(0)}` : "Select dates"}
+          {isOwnListing ? "This Is Your Listing" : nights > 0 ? `Book · ${currency.symbol} ${total.toFixed(0)}` : "Select dates"}
         </Button>
       </DialogContent>
     </Dialog>
@@ -256,6 +296,7 @@ const StayCard = ({ stay, onView }: { stay: Stay; onView: (stay: Stay) => void }
       <div className="relative aspect-square w-full bg-muted">
         <Image src={stay.images[0]} alt={stay.title} fill className="object-cover" />
         <Badge className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border-0">{stay.type}</Badge>
+        {stay.stayId && <Badge variant="secondary" className="absolute top-3 left-3">Hosted by @{stay.hostHandle}</Badge>}
       </div>
       <CardHeader className="p-3 pb-1">
         <div className="flex items-center justify-between gap-2">
@@ -278,12 +319,20 @@ const StayCard = ({ stay, onView }: { stay: Stay; onView: (stay: Stay) => void }
 
 export default function StaysMarketplace({ searchTerm }: { searchTerm: string }) {
   const [viewingStay, setViewingStay] = useState<Stay | null>(null);
+  const [hostedStays, setHostedStays] = useState<HostedStay[]>([]);
 
-  const filteredStays = useMemo(() => stays.filter(stay =>
+  useEffect(() => subscribeToStays(setHostedStays), []);
+
+  const allStays = useMemo(
+    () => [...hostedStays.map(hostedStayToDisplay), ...stays],
+    [hostedStays]
+  );
+
+  const filteredStays = useMemo(() => allStays.filter(stay =>
     stay.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     stay.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
     stay.type.toLowerCase().includes(searchTerm.toLowerCase())
-  ), [searchTerm]);
+  ), [allStays, searchTerm]);
 
   return (
     <>

@@ -25,7 +25,7 @@ export type Wallet = {
 
 export type WalletTransaction = {
   id: string;
-  type: "send" | "receive" | "topup" | "withdrawal" | "swap" | "gift-sent" | "gift-received" | "purchase" | "sale";
+  type: "send" | "receive" | "topup" | "withdrawal" | "swap" | "gift-sent" | "gift-received" | "purchase" | "sale" | "driver-earning";
   amount: number;
   fee?: number;
   recipient?: string;
@@ -99,16 +99,34 @@ export async function sendGift(
   await call({ streamerUid: streamer.uid, giftName, price });
 }
 
-// `productId` is set only for real, partner-listed marketplace items (see
-// src/lib/products.ts) - when present, the Cloud Function looks up the
-// authoritative price/seller itself and ignores `item`/`amount` entirely,
-// crediting the seller's wallet. Omit it for the legacy static-catalog
-// items (Events/Stays/Skip/Shop's curated list), which still trust the
-// client-supplied amount with no seller to credit - see the SECURITY NOTE
-// in functions/src/index.ts.
-export async function spendFunds(uid: string, item: string, amount: number, productId?: string) {
+export type SpendFundsOptions = {
+  /** Real, partner-listed Shop product (src/lib/products.ts). */
+  productId?: string;
+  /** Real, host-listed stay (src/lib/stays.ts) - both dates required together. */
+  stayId?: string;
+  checkIn?: string;
+  checkOut?: string;
+  /** Real, partner-created event (src/lib/events.ts). */
+  eventId?: string;
+  /** Skip ride/delivery - matches an active registered driver (src/lib/drivers.ts)
+   * in the same region offering this service, and pays them directly. */
+  rideService?: { region: string; serviceType: "taxi" | "courier" | "tow" };
+};
+
+// Any of the ids/refs in `options` make the Cloud Function look up the
+// authoritative price/seller itself and credit them - `item`/`amount` are
+// only trusted as-is when none of them are set (Skip fares with no driver
+// match, and anything still on Shop's static curated catalog). See the
+// NOTE in functions/src/index.ts.
+export async function spendFunds(
+  uid: string,
+  item: string,
+  amount: number,
+  options?: SpendFundsOptions
+): Promise<{ ok: true; driver?: { uid: string; handle: string; name: string } | null }> {
   const call = httpsCallable(functions, "spendFunds");
-  await call({ item, amount, productId });
+  const result = await call({ item, amount, ...options });
+  return result.data as { ok: true; driver?: { uid: string; handle: string; name: string } | null };
 }
 
 // Top-ups are a two-step flow rather than a single trusted call, since this

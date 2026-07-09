@@ -46,12 +46,18 @@ const MOOOD_TOKEN_RATE = 2;
 const GIFT_PLATFORM_FEE_PERCENT = 0.2;
 const SIGNUP_BONUS_TOKENS = 100;
 const MARKETPLACE_FEE_PERCENT = 0.1;
+const HOST_FEE_PERCENT = 0.12;
+const EVENT_FEE_PERCENT = 0.1;
+const DRIVER_FEE_PERCENT = 0.15;
 
 const walletRef = (uid: string) => db.collection("wallets").doc(uid);
 const transactionsRef = (uid: string) => walletRef(uid).collection("transactions");
 const userRef = (uid: string) => db.collection("users").doc(uid);
 const topupIntentRef = (id: string) => db.collection("topupIntents").doc(id);
 const productRef = (id: string) => db.collection("products").doc(id);
+const stayRef = (id: string) => db.collection("stays").doc(id);
+const eventRef = (id: string) => db.collection("events").doc(id);
+const driversCol = () => db.collection("drivers");
 const withdrawalIntentRef = (id: string) => db.collection("withdrawalIntents").doc(id);
 const notificationsRef = (uid: string) => db.collection("notifications").doc(uid).collection("items");
 
@@ -296,7 +302,16 @@ export const sendGift = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (re
 export const spendFunds = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
   await enforceRateLimit(uid, "spendFunds", 30, 60_000);
-  const { item, amount, productId } = (request.data ?? {}) as { item?: string; amount?: number; productId?: string };
+  const { item, amount, productId, stayId, eventId, checkIn, checkOut, rideService } = (request.data ?? {}) as {
+    item?: string;
+    amount?: number;
+    productId?: string;
+    stayId?: string;
+    checkIn?: string;
+    checkOut?: string;
+    eventId?: string;
+    rideService?: { region?: string; serviceType?: string };
+  };
 
   // Real marketplace listings (functions/src/index.ts's products collection,
   // created via the Partner Dashboard's Create Listing flow) have an
@@ -346,6 +361,172 @@ export const spendFunds = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
     return { ok: true };
   }
 
+  // Real stays (src/lib/stays.ts, created via the Partner Dashboard's
+  // "Become a Host" flow) work like real products above, except the total
+  // depends on how many nights the buyer picked - so the server computes
+  // that from checkIn/checkOut itself rather than trusting a client-sent
+  // total, while still trusting the stay's own pricePerNight from Firestore.
+  if (typeof stayId === "string" && stayId) {
+    if (typeof checkIn !== "string" || typeof checkOut !== "string") {
+      throw new HttpsError("invalid-argument", "checkIn and checkOut are required.");
+    }
+    const nights = Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86_400_000);
+    if (!(nights > 0)) {
+      throw new HttpsError("invalid-argument", "checkOut must be after checkIn.");
+    }
+
+    await db.runTransaction(async (tx) => {
+      const staySnap = await tx.get(stayRef(stayId));
+      if (!staySnap.exists) {
+        throw new HttpsError("not-found", "Stay not found.");
+      }
+      const stay = staySnap.data() as { hostUid: string; title: string; pricePerNight: number };
+      if (stay.hostUid === uid) {
+        throw new HttpsError("failed-precondition", "You can't book your own listing.");
+      }
+
+      const total = nights * stay.pricePerNight;
+      const buyer = await getWalletBalances(tx, uid);
+      if (total > buyer.balance) {
+        throw new HttpsError("failed-precondition", "Insufficient funds.");
+      }
+      const host = await getWalletBalances(tx, stay.hostUid);
+      if (!host.exists) {
+        throw new HttpsError("not-found", "Host wallet not found.");
+      }
+      const hostShare = total * (1 - HOST_FEE_PERCENT);
+      const label = `${stay.title} (${nights} night${nights > 1 ? "s" : ""})`;
+
+      tx.update(walletRef(uid), { balance: buyer.balance - total, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(walletRef(stay.hostUid), { balance: host.balance + hostShare, updatedAt: FieldValue.serverTimestamp() });
+      tx.set(transactionsRef(uid).doc(), {
+        type: "purchase",
+        amount: total,
+        item: label,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(transactionsRef(stay.hostUid).doc(), {
+        type: "sale",
+        amount: hostShare,
+        item: stay.title,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      notify(tx, stay.hostUid, "Your Stay Was Booked!", `${label} - you earned ${hostShare.toFixed(2)}.`);
+    });
+
+    return { ok: true };
+  }
+
+  // Real events (src/lib/events.ts, created via the Partner Dashboard's
+  // "Create Event" flow) work exactly like real products - fixed price, no
+  // date-range math needed.
+  if (typeof eventId === "string" && eventId) {
+    await db.runTransaction(async (tx) => {
+      const eventSnap = await tx.get(eventRef(eventId));
+      if (!eventSnap.exists) {
+        throw new HttpsError("not-found", "Event not found.");
+      }
+      const eventDoc = eventSnap.data() as { organizerUid: string; title: string; priceValue: number };
+      if (eventDoc.organizerUid === uid) {
+        throw new HttpsError("failed-precondition", "You can't book your own event.");
+      }
+      if (!(eventDoc.priceValue > 0)) {
+        return; // Free event - nothing to charge or credit.
+      }
+
+      const buyer = await getWalletBalances(tx, uid);
+      if (eventDoc.priceValue > buyer.balance) {
+        throw new HttpsError("failed-precondition", "Insufficient funds.");
+      }
+      const organizer = await getWalletBalances(tx, eventDoc.organizerUid);
+      if (!organizer.exists) {
+        throw new HttpsError("not-found", "Organizer wallet not found.");
+      }
+      const organizerShare = eventDoc.priceValue * (1 - EVENT_FEE_PERCENT);
+
+      tx.update(walletRef(uid), { balance: buyer.balance - eventDoc.priceValue, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(walletRef(eventDoc.organizerUid), { balance: organizer.balance + organizerShare, updatedAt: FieldValue.serverTimestamp() });
+      tx.set(transactionsRef(uid).doc(), {
+        type: "purchase",
+        amount: eventDoc.priceValue,
+        item: eventDoc.title,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(transactionsRef(eventDoc.organizerUid).doc(), {
+        type: "sale",
+        amount: organizerShare,
+        item: eventDoc.title,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      notify(tx, eventDoc.organizerUid, "Ticket Sold!", `Someone booked "${eventDoc.title}" - you earned ${organizerShare.toFixed(2)}.`);
+    });
+
+    return { ok: true };
+  }
+
+  // Skip rides/deliveries with a registered driver available in the same
+  // region offering the requested service (src/lib/drivers.ts, the
+  // Partner Dashboard's Driver Console) credit that driver directly,
+  // instead of the fare just disappearing into the platform. The fare
+  // itself is still client-trusted (same as the rest of Skip's static
+  // catalog - see the NOTE below), only the driver match + payout is new.
+  // Deliberately a plain region+status equality query (no array-contains
+  // combined with it) so it doesn't need a composite Firestore index -
+  // the services match is filtered in code instead.
+  if (rideService && typeof rideService.region === "string" && typeof rideService.serviceType === "string") {
+    if (typeof item !== "string" || !item) {
+      throw new HttpsError("invalid-argument", "item is required.");
+    }
+    if (typeof amount !== "number" || !(amount > 0)) {
+      throw new HttpsError("invalid-argument", "amount must be a positive number.");
+    }
+    const { region, serviceType } = rideService;
+
+    let matchedDriver: { uid: string; handle: string; name: string } | null = null;
+
+    await db.runTransaction(async (tx) => {
+      const wallet = await getWalletBalances(tx, uid);
+      if (amount > wallet.balance) {
+        throw new HttpsError("failed-precondition", "Insufficient funds.");
+      }
+
+      const candidates = await tx.get(
+        driversCol().where("region", "==", region).where("status", "==", "active").limit(20)
+      );
+      const driverDoc = candidates.docs.find((d) => {
+        const services = d.data().services as string[] | undefined;
+        return d.id !== uid && Array.isArray(services) && services.includes(serviceType);
+      });
+
+      tx.update(walletRef(uid), { balance: wallet.balance - amount, updatedAt: FieldValue.serverTimestamp() });
+      tx.set(transactionsRef(uid).doc(), {
+        type: "purchase",
+        amount,
+        item,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      if (driverDoc) {
+        const driver = driverDoc.data() as { ownerHandle: string; ownerName: string };
+        const driverWallet = await getWalletBalances(tx, driverDoc.id);
+        if (driverWallet.exists) {
+          const driverShare = amount * (1 - DRIVER_FEE_PERCENT);
+          tx.update(walletRef(driverDoc.id), { balance: driverWallet.balance + driverShare, updatedAt: FieldValue.serverTimestamp() });
+          tx.set(transactionsRef(driverDoc.id).doc(), {
+            type: "driver-earning",
+            amount: driverShare,
+            item,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+          notify(tx, driverDoc.id, "New Ride Earning", `You earned ${driverShare.toFixed(2)} for "${item}".`);
+          matchedDriver = { uid: driverDoc.id, handle: driver.ownerHandle, name: driver.ownerName };
+        }
+      }
+    });
+
+    return { ok: true, driver: matchedDriver };
+  }
+
   if (typeof item !== "string" || !item) {
     throw new HttpsError("invalid-argument", "item is required.");
   }
@@ -353,13 +534,15 @@ export const spendFunds = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
     throw new HttpsError("invalid-argument", "amount must be a positive number.");
   }
 
-  // NOTE: `amount` is trusted from the caller for this legacy path because
-  // Events/Stays/Skip/Shop's curated catalog are still static arrays in the
-  // frontend with no server-side record to check against - unlike the real
-  // `products` catalog above, there's no seller here to credit either
-  // (these are all "sold by Moood" platform items). Migrating each of these
-  // to a real, server-priced catalog (the way `products` now works) closes
-  // this the same way the wallet migration closed client-writable balances.
+  // NOTE: `amount` is trusted from the caller for this final fallback path -
+  // it's what's left once productId/stayId/eventId/rideService have all
+  // been ruled out: Shop's own curated catalog, Skip fares with no driver
+  // match, and any ride with no rideService info at all. These stay "sold
+  // by Moood" with no real seller/driver to credit, on a static price the
+  // frontend made up rather than a server-side record. Migrating each of
+  // these to a real, server-priced catalog (the way products/stays/events
+  // now work) closes this the same way the wallet migration closed
+  // client-writable balances.
 
   await db.runTransaction(async (tx) => {
     const wallet = await getWalletBalances(tx, uid);
