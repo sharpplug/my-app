@@ -20,6 +20,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import StaysMarketplace from "@/components/stays-marketplace";
 import { mockEvents, type MoodEvent as BaseMoodEvent } from "@/lib/catalog-data";
 import { subscribeToEvents, type HostedEvent } from "@/lib/events";
+import { averageRating } from "@/lib/ratings";
+import RatingStars from "@/components/rating-stars";
+import RateDialog from "@/components/rate-dialog";
 
 const StaticMap = dynamic(() => import("@/components/static-map"), {
   ssr: false,
@@ -34,9 +37,14 @@ type MoodEvent = Omit<BaseMoodEvent, "id"> & {
   eventId?: string;
   organizerUid?: string;
   organizerHandle?: string;
+  /** Only set for real, partner-created events - mock events have no
+   * genuine rating data to show. */
+  ratingAverage?: number;
+  ratingCount?: number;
 };
 
 function hostedEventToDisplay(event: HostedEvent, currencySymbol: string): MoodEvent {
+  const { average, count } = averageRating(event);
   return {
     id: event.id,
     title: event.title,
@@ -53,6 +61,8 @@ function hostedEventToDisplay(event: HostedEvent, currencySymbol: string): MoodE
     eventId: event.id,
     organizerUid: event.organizerUid,
     organizerHandle: event.organizerHandle,
+    ratingAverage: average,
+    ratingCount: count,
   };
 }
 
@@ -60,6 +70,7 @@ const BookingDialog = ({ event, open, onOpenChange }: { event: MoodEvent | null;
   const { toast } = useToast();
   const { user } = useAuth();
   const [isPending, setIsPending] = useState(false);
+  const [isRateOpen, setIsRateOpen] = useState(false);
 
   if (!event) return null;
   const isFree = event.priceValue === 0;
@@ -99,12 +110,20 @@ const BookingDialog = ({ event, open, onOpenChange }: { event: MoodEvent | null;
             <span className="text-sm font-bold">{isFree ? "Entry" : "Ticket Price"}</span>
             <span className="text-xl font-black text-primary">{event.price}</span>
           </div>
+          {event.eventId && !isOwnEvent && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setIsRateOpen(true)}>
+              <Ticket className="w-3.5 h-3.5" /> Rate this event
+            </Button>
+          )}
         </div>
         <Button className="w-full h-14 rounded-xl text-lg font-bold" onClick={handleBook} disabled={isPending || isOwnEvent}>
           {isPending ? <Loader2 className="animate-spin mr-2 w-4 h-4" /> : <Ticket className="mr-2 w-4 h-4" />}
           {isOwnEvent ? "This Is Your Event" : isFree ? "Reserve Free Spot" : `Pay ${event.price}`}
         </Button>
       </DialogContent>
+      {event.eventId && (
+        <RateDialog open={isRateOpen} onOpenChange={setIsRateOpen} entityType="event" entityId={event.eventId} title={event.title} />
+      )}
     </Dialog>
   );
 };
@@ -139,6 +158,11 @@ const EventCard = ({ event, onBook }: { event: MoodEvent; onBook: (event: MoodEv
           <MicVocal className="w-4 h-4" />
           <span>{event.category}</span>
         </div>
+        {event.eventId && (
+          <div className="pt-1">
+            <RatingStars average={event.ratingAverage ?? 0} count={event.ratingCount ?? 0} />
+          </div>
+        )}
       </CardHeader>
       <CardContent className="flex-grow space-y-3">
         <div className="flex items-center text-sm text-muted-foreground">

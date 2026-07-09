@@ -17,6 +17,9 @@ import { useAuth } from "@/contexts/auth-provider";
 import { useRegional } from "@/contexts/language-provider";
 import { spendFunds } from "@/lib/wallet";
 import { subscribeToStays, type HostedStay } from "@/lib/stays";
+import { averageRating } from "@/lib/ratings";
+import RatingStars from "@/components/rating-stars";
+import RateDialog from "@/components/rate-dialog";
 
 const StaticMap = dynamic(() => import("@/components/static-map"), {
   ssr: false,
@@ -148,14 +151,15 @@ export type Stay = (typeof stays)[0] & {
 };
 
 function hostedStayToDisplay(stay: HostedStay): Stay {
+  const { average, count } = averageRating(stay);
   return {
     id: stay.id,
     title: stay.title,
     location: stay.location,
     type: stay.type,
     pricePerNight: stay.pricePerNight,
-    rating: 5,
-    reviews: 0,
+    rating: average,
+    reviews: count,
     guests: stay.guests,
     bedrooms: stay.bedrooms,
     beds: stay.beds,
@@ -187,6 +191,7 @@ const StayDetailDialog = ({ stay, open, onOpenChange }: { stay: Stay | null; ope
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [isPending, setIsPending] = useState(false);
+  const [isRateOpen, setIsRateOpen] = useState(false);
 
   useEffect(() => {
     if (!open) { setCheckIn(""); setCheckOut(""); }
@@ -234,17 +239,19 @@ const StayDetailDialog = ({ stay, open, onOpenChange }: { stay: Stay | null; ope
           </div>
 
           <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-1.5">
-              <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-              <span className="font-bold">{stay.rating}</span>
-              <span className="text-muted-foreground">({stay.reviews} reviews)</span>
-            </div>
+            <RatingStars average={stay.rating} count={stay.reviews} size="md" />
             <div className="flex items-center gap-2 text-muted-foreground text-xs">
               <Users className="w-3.5 h-3.5" /> {stay.guests}
               <BedDouble className="w-3.5 h-3.5 ml-2" /> {stay.bedrooms}
               <Bath className="w-3.5 h-3.5 ml-2" /> {stay.baths}
             </div>
           </div>
+
+          {stay.stayId && !isOwnListing && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setIsRateOpen(true)}>
+              <Star className="w-3.5 h-3.5" /> Rate this stay
+            </Button>
+          )}
 
           <div className="flex flex-wrap gap-2">
             {stay.amenities.map((a) => {
@@ -285,6 +292,9 @@ const StayDetailDialog = ({ stay, open, onOpenChange }: { stay: Stay | null; ope
           {isOwnListing ? "This Is Your Listing" : nights > 0 ? `Book · ${currency.symbol} ${total.toFixed(0)}` : "Select dates"}
         </Button>
       </DialogContent>
+      {stay.stayId && (
+        <RateDialog open={isRateOpen} onOpenChange={setIsRateOpen} entityType="stay" entityId={stay.stayId} title={stay.title} />
+      )}
     </Dialog>
   );
 };
@@ -301,8 +311,8 @@ const StayCard = ({ stay, onView }: { stay: Stay; onView: (stay: Stay) => void }
       <CardHeader className="p-3 pb-1">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-sm font-bold truncate">{stay.title}</CardTitle>
-          <div className="flex items-center gap-1 text-xs shrink-0">
-            <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> {stay.rating}
+          <div className="shrink-0">
+            <RatingStars average={stay.rating} count={stay.reviews} showCount={false} />
           </div>
         </div>
       </CardHeader>

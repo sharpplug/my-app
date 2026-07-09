@@ -31,6 +31,8 @@ export type HostedStay = {
   lat: number;
   lng: number;
   createdAt: Timestamp | null;
+  ratingSum?: number;
+  ratingCount?: number;
 };
 
 const staysRef = collection(firestore, "stays");

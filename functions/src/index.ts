@@ -14,7 +14,7 @@
 
 import { createHmac, timingSafeEqual } from "crypto";
 import { initializeApp } from "firebase-admin/app";
-import { getFirestore, FieldValue, Transaction } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp, Transaction } from "firebase-admin/firestore";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 
@@ -49,6 +49,8 @@ const MARKETPLACE_FEE_PERCENT = 0.1;
 const HOST_FEE_PERCENT = 0.12;
 const EVENT_FEE_PERCENT = 0.1;
 const DRIVER_FEE_PERCENT = 0.15;
+const AD_PRICE_PER_DAY = 20;
+const AD_MAX_DAYS = 14;
 
 const walletRef = (uid: string) => db.collection("wallets").doc(uid);
 const transactionsRef = (uid: string) => walletRef(uid).collection("transactions");
@@ -58,8 +60,17 @@ const productRef = (id: string) => db.collection("products").doc(id);
 const stayRef = (id: string) => db.collection("stays").doc(id);
 const eventRef = (id: string) => db.collection("events").doc(id);
 const driversCol = () => db.collection("drivers");
+const adsCol = () => db.collection("ads");
 const withdrawalIntentRef = (id: string) => db.collection("withdrawalIntents").doc(id);
 const notificationsRef = (uid: string) => db.collection("notifications").doc(uid).collection("items");
+
+/** Maps a rating/review entity type to its Firestore collection - shared
+ * by submitRating below. */
+const RATED_COLLECTION: Record<"stay" | "event" | "driver", string> = {
+  stay: "stays",
+  event: "events",
+  driver: "drivers",
+};
 
 /**
  * Every vertical writes its own "something happened to your account"
@@ -403,6 +414,7 @@ export const spendFunds = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
         type: "purchase",
         amount: total,
         item: label,
+        stayId,
         createdAt: FieldValue.serverTimestamp(),
       });
       tx.set(transactionsRef(stay.hostUid).doc(), {
@@ -450,6 +462,7 @@ export const spendFunds = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
         type: "purchase",
         amount: eventDoc.priceValue,
         item: eventDoc.title,
+        eventId,
         createdAt: FieldValue.serverTimestamp(),
       });
       tx.set(transactionsRef(eventDoc.organizerUid).doc(), {
@@ -503,6 +516,7 @@ export const spendFunds = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
         type: "purchase",
         amount,
         item,
+        driverUid: driverDoc?.id ?? null,
         createdAt: FieldValue.serverTimestamp(),
       });
 
@@ -915,4 +929,148 @@ export const simulateWithdrawalConfirmation = onCall({ enforceAppCheck: ENFORCE_
   }
 
   return { ok: true };
+});
+
+/**
+ * Star ratings for Skip drivers, Stays, and Events. Gated on actually
+ * having transacted with the thing being rated - the buyer-side purchase
+ * transaction now carries a stayId/eventId/driverUid (see the productId/
+ * stayId/eventId/rideService branches of spendFunds above), so this just
+ * checks for at least one matching transaction rather than trusting the
+ * client's word that a booking happened. One review per user per entity
+ * (the review doc ID is the rater's own uid), so resubmitting updates
+ * their existing rating instead of inflating the count.
+ */
+export const submitRating = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
+  const uid = requireAuth(request);
+  await enforceRateLimit(uid, "submitRating", 20, 60_000);
+  const { entityType, entityId, rating, comment } = (request.data ?? {}) as {
+    entityType?: "stay" | "event" | "driver";
+    entityId?: string;
+    rating?: number;
+    comment?: string;
+  };
+
+  if (entityType !== "stay" && entityType !== "event" && entityType !== "driver") {
+    throw new HttpsError("invalid-argument", "entityType must be 'stay', 'event', or 'driver'.");
+  }
+  if (typeof entityId !== "string" || !entityId) {
+    throw new HttpsError("invalid-argument", "entityId is required.");
+  }
+  if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+    throw new HttpsError("invalid-argument", "rating must be a whole number from 1 to 5.");
+  }
+  if (comment !== undefined && (typeof comment !== "string" || comment.length > 500)) {
+    throw new HttpsError("invalid-argument", "comment must be 500 characters or fewer.");
+  }
+
+  const fieldName = entityType === "stay" ? "stayId" : entityType === "event" ? "eventId" : "driverUid";
+  const eligible = await transactionsRef(uid).where(fieldName, "==", entityId).limit(1).get();
+  if (eligible.empty) {
+    throw new HttpsError("failed-precondition", "You can only rate something you've actually booked or ridden with.");
+  }
+
+  const handle = await requireHandle(uid);
+  const entityDocRef = db.collection(RATED_COLLECTION[entityType]).doc(entityId);
+  const reviewRef = entityDocRef.collection("reviews").doc(uid);
+
+  await db.runTransaction(async (tx) => {
+    const [entitySnap, reviewSnap] = await Promise.all([tx.get(entityDocRef), tx.get(reviewRef)]);
+    if (!entitySnap.exists) {
+      throw new HttpsError("not-found", "Listing not found.");
+    }
+    const data = entitySnap.data() as { ratingSum?: number; ratingCount?: number };
+    const previousRating = reviewSnap.exists ? (reviewSnap.data()?.rating as number | undefined) : undefined;
+
+    let ratingSum = data.ratingSum ?? 0;
+    let ratingCount = data.ratingCount ?? 0;
+    if (previousRating !== undefined) {
+      ratingSum = ratingSum - previousRating + rating;
+    } else {
+      ratingSum += rating;
+      ratingCount += 1;
+    }
+
+    tx.set(reviewRef, {
+      authorUid: uid,
+      authorHandle: handle,
+      rating,
+      comment: comment ?? null,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(entityDocRef, { ratingSum, ratingCount });
+  });
+
+  return { ok: true };
+});
+
+/**
+ * Paid, time-boxed in-app promotion ("Ads" - Partner Dashboard's "Promote"
+ * flow). Buying an ad slot is a straight platform-revenue purchase (no
+ * seller to credit, same pattern as Skip fares with no driver match) -
+ * `durationDays` sets a server-computed price and expiresAt, both ignoring
+ * whatever the client might send, so a promotion can't be bought cheaper
+ * or made to run longer than paid for. There's no scheduled cleanup job
+ * for expired ads; src/lib/ads.ts's subscribeToActiveAds filters
+ * `expiresAt > now` instead, so an expired ad simply stops being queried/
+ * rendered rather than needing to be deleted.
+ */
+export const purchaseAd = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
+  const uid = requireAuth(request);
+  await enforceRateLimit(uid, "purchaseAd", 5, 60_000);
+  const { title, description, image, targetType, targetId, linkPath, durationDays } = (request.data ?? {}) as {
+    title?: string;
+    description?: string;
+    image?: string;
+    targetType?: "product" | "stay" | "event" | "driver" | "external";
+    targetId?: string;
+    linkPath?: string;
+    durationDays?: number;
+  };
+
+  if (typeof title !== "string" || !title.trim()) {
+    throw new HttpsError("invalid-argument", "title is required.");
+  }
+  if (typeof linkPath !== "string" || !linkPath.startsWith("/")) {
+    throw new HttpsError("invalid-argument", "linkPath must be an in-app path starting with '/'.");
+  }
+  if (typeof durationDays !== "number" || !Number.isInteger(durationDays) || durationDays < 1 || durationDays > AD_MAX_DAYS) {
+    throw new HttpsError("invalid-argument", `durationDays must be a whole number from 1 to ${AD_MAX_DAYS}.`);
+  }
+
+  const cost = durationDays * AD_PRICE_PER_DAY;
+  const handle = await requireHandle(uid);
+  const adRef = adsCol().doc();
+
+  await db.runTransaction(async (tx) => {
+    const wallet = await getWalletBalances(tx, uid);
+    if (cost > wallet.balance) {
+      throw new HttpsError("failed-precondition", "Insufficient funds.");
+    }
+
+    tx.update(walletRef(uid), { balance: wallet.balance - cost, updatedAt: FieldValue.serverTimestamp() });
+    tx.set(transactionsRef(uid).doc(), {
+      type: "purchase",
+      amount: cost,
+      item: `Ad: ${title} (${durationDays}d)`,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.set(adRef, {
+      ownerUid: uid,
+      ownerHandle: handle,
+      title: title.trim(),
+      description: (description ?? "").trim(),
+      image: image ?? null,
+      targetType: targetType ?? "external",
+      targetId: targetId ?? null,
+      linkPath,
+      durationDays,
+      cost,
+      createdAt: FieldValue.serverTimestamp(),
+      expiresAt: Timestamp.fromMillis(Date.now() + durationDays * 86_400_000),
+    });
+    notify(tx, uid, "Your Ad Is Live!", `"${title}" is now promoted in the app for ${durationDays} day${durationDays > 1 ? "s" : ""}.`);
+  });
+
+  return { ok: true, adId: adRef.id };
 });

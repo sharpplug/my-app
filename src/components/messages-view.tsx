@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,7 @@ import { useToast } from '@/hooks/use-toast';
 import CameraView from '@/components/camera-view';
 import AppCall, { CallTarget } from './app-call';
 import SendMoneyDialog from '@/components/send-money-dialog';
+import { useActiveAds, type Ad } from '@/lib/ads';
 
 const mockConversations = [
   {
@@ -75,25 +76,37 @@ const fileToDataUri = (file: File): Promise<string> => {
   });
 };
 
-const SponsoredMessage = () => (
-    <div className="flex justify-center my-4">
-        <Card className="w-full max-w-sm border-primary/20 bg-primary/10">
-            <CardContent className="p-3">
-                <div className="flex items-center gap-3">
-                    <div className="bg-primary/20 p-2 rounded-lg">
-                        <Sparkles className="w-5 h-5 text-primary"/>
+/** Renders a real, partner-paid promotion (see src/lib/ads.ts) rather than
+ * hardcoded fake content - it disappears on its own once the ad's paid
+ * duration expires, since useActiveAds() only ever returns active ads. */
+const AdMessage = ({ ad }: { ad: Ad }) => {
+    const router = useRouter();
+    return (
+        <div className="flex justify-center my-4">
+            <Card className="w-full max-w-sm border-primary/20 bg-primary/10">
+                <CardContent className="p-3">
+                    <div className="flex items-center gap-3">
+                        {ad.image ? (
+                            <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-primary/20">
+                                <Image src={ad.image} alt={ad.title} fill className="object-cover" />
+                            </div>
+                        ) : (
+                            <div className="bg-primary/20 p-2 rounded-lg shrink-0">
+                                <Sparkles className="w-5 h-5 text-primary"/>
+                            </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                            <p className="text-xs text-primary font-semibold">SPONSORED</p>
+                            <p className="text-sm font-medium truncate">{ad.title}</p>
+                            <p className="text-xs text-primary/80 truncate">{ad.description}</p>
+                        </div>
+                        <Button size="sm" className="ml-auto text-xs h-7 shrink-0" onClick={() => router.push(ad.linkPath)}>View</Button>
                     </div>
-                    <div>
-                        <p className="text-xs text-primary font-semibold">SPONSORED</p>
-                        <p className="text-sm font-medium">Live Music Night</p>
-                        <p className="text-xs text-primary/80">Tonight at The Music Hall, 9 PM. Don't miss out!</p>
-                    </div>
-                    <Button size="sm" className="ml-auto text-xs h-7">Get Ticket</Button>
-                </div>
-            </CardContent>
-        </Card>
-    </div>
-);
+                </CardContent>
+            </Card>
+        </div>
+    );
+};
 
 
 export default function MessagesView() {
@@ -108,6 +121,7 @@ export default function MessagesView() {
     const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
     const [isSendMoneyOpen, setIsSendMoneyOpen] = useState(false);
     const { toast } = useToast();
+    const activeAds = useActiveAds();
 
     const selectedConversation = conversations.find(c => c.id === selectedConversationId);
 
@@ -348,7 +362,7 @@ export default function MessagesView() {
                                         </AlertDialog>
                                     )}
                                 </div>
-                                { (index + 1) % 4 === 0 && <SponsoredMessage /> }
+                                { (index + 1) % 4 === 0 && activeAds.length > 0 && <AdMessage ad={activeAds[Math.floor(index / 4) % activeAds.length]} /> }
                              </React.Fragment>
                         ))}
                         </div>

@@ -27,6 +27,8 @@ export type HostedEvent = {
   lat: number;
   lng: number;
   createdAt: Timestamp | null;
+  ratingSum?: number;
+  ratingCount?: number;
 };
 
 const eventsRef = collection(firestore, "events");

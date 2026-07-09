@@ -14,6 +14,8 @@ export type DriverProfile = {
   region: string;
   status: "active";
   createdAt: Timestamp | null;
+  ratingSum?: number;
+  ratingCount?: number;
 };
 
 const driverDocRef = (uid: string) => doc(firestore, "drivers", uid);

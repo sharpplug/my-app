@@ -4,7 +4,7 @@ import React, { useState, useTransition, useEffect, useRef, useMemo, lazy, Suspe
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Camera, Image as ImageIcon, Sparkles, Heart, Send, BrainCircuit, Gift, Waves, MapPin, Users, Phone, X, Music, Trash2, Loader2, BookOpen } from "lucide-react";
+import { Camera, Image as ImageIcon, Sparkles, Heart, Send, BrainCircuit, Gift, Waves, MapPin, Users, Phone, X, Music, Trash2, Loader2, BookOpen, Megaphone } from "lucide-react";
 import Image from 'next/image';
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -32,6 +32,7 @@ import {
     type VibeComment,
 } from "@/lib/vibes";
 import { sendGift, spendFunds } from "@/lib/wallet";
+import { useActiveAds, type Ad } from "@/lib/ads";
 import { Timestamp } from "firebase/firestore";
 
 const PanoramaView = lazy(() => import('./panorama-view'));
@@ -284,6 +285,37 @@ const PostCard = ({ post, myUid, onOpen, onCall, onDelete }: { post: VibePost; m
     );
 };
 
+/** A real, partner-paid promotion interspersed into the feed (see
+ * src/lib/ads.ts) - it stops appearing on its own once the ad's paid
+ * duration expires, since useActiveAds() only ever returns active ads. */
+const AdCard = ({ ad }: { ad: Ad }) => {
+    const router = useRouter();
+    return (
+        <div className="h-full w-full relative rounded-[2rem] overflow-hidden border border-amber-400/20 bg-black shadow-2xl cursor-pointer" onClick={() => router.push(ad.linkPath)}>
+            {ad.image ? (
+                <Image src={ad.image} alt={ad.title} fill className="object-cover opacity-70" />
+            ) : (
+                <div className="absolute inset-0 bg-gradient-to-br from-amber-500/20 to-purple-600/20" />
+            )}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/50 pointer-events-none" />
+            <div className="absolute top-6 left-6 right-6 flex items-center justify-between z-10">
+                <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/20 gap-1"><Megaphone className="w-3 h-3" /> Promoted</Badge>
+                <span className="text-[10px] text-white/50">@{ad.ownerHandle}</span>
+            </div>
+            <div className="absolute bottom-6 left-6 right-6 z-10 space-y-3">
+                <p className="text-2xl font-black text-white leading-tight">{ad.title}</p>
+                <p className="text-sm text-white/80 line-clamp-3">{ad.description}</p>
+                <Button
+                    className="w-full h-12 rounded-xl font-bold bg-amber-400 text-black hover:bg-amber-300"
+                    onClick={(e) => { e.stopPropagation(); router.push(ad.linkPath); }}
+                >
+                    Learn More
+                </Button>
+            </div>
+        </div>
+    );
+};
+
 const AiAnalysisDialog = ({ post, open, onOpenChange }: { post: VibePost; open: boolean; onOpenChange: (open: boolean) => void; }) => {
     const [analysis, setAnalysis] = useState<AnalyzeVibePostOutput | null>(null);
     const [isPending, startTransition] = useTransition();
@@ -459,6 +491,7 @@ export function VibeFeed({ profile }: { profile: UserProfile | null }) {
     const [isRanking, setIsRanking] = useState(false);
     const [rankedIds, setRankedIds] = useState<string[] | null>(null);
     const { toast } = useToast();
+    const activeAds = useActiveAds();
 
     useEffect(() => subscribeToVibePosts(setPosts), []);
 
@@ -539,10 +572,17 @@ export function VibeFeed({ profile }: { profile: UserProfile | null }) {
                 </button>
             </div>
             <div className="space-y-10">
-                {(displayedPosts ?? posts).map(p => (
-                    <div key={p.id} className="h-[85vh] min-h-[600px] w-full">
-                        <PostCard post={p} myUid={profile?.uid} onDelete={handleDelete} onOpen={setViewingPost} onCall={setActiveCall} />
-                    </div>
+                {(displayedPosts ?? posts).map((p, i) => (
+                    <React.Fragment key={p.id}>
+                        <div className="h-[85vh] min-h-[600px] w-full">
+                            <PostCard post={p} myUid={profile?.uid} onDelete={handleDelete} onOpen={setViewingPost} onCall={setActiveCall} />
+                        </div>
+                        {(i + 1) % 4 === 0 && activeAds.length > 0 && (
+                            <div className="h-[85vh] min-h-[600px] w-full">
+                                <AdCard ad={activeAds[Math.floor(i / 4) % activeAds.length]} />
+                            </div>
+                        )}
+                    </React.Fragment>
                 ))}
             </div>
             <LiveStreamViewer post={viewingPost?.type === 'live' ? viewingPost : null} open={viewingPost?.type === 'live'} onOpenChange={(o) => !o && setViewingPost(null)} myProfile={profile} />

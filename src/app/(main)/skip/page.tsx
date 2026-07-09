@@ -51,6 +51,7 @@ import { spendFunds } from '@/lib/wallet';
 import dynamic from 'next/dynamic';
 import { Skeleton } from '@/components/ui/skeleton';
 import { REGION_CENTERS } from '@/lib/catalog-data';
+import RateDialog from '@/components/rate-dialog';
 
 const StaticMap = dynamic(() => import('@/components/static-map'), {
   ssr: false,
@@ -256,6 +257,7 @@ export default function SkipPage() {
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [safetyMessage, setSafetyMessage] = useState<string | null>(null);
   const [matchedDriver, setMatchedDriver] = useState<{ uid: string; handle: string; name: string } | null>(null);
+  const [isRateDriverOpen, setIsRateDriverOpen] = useState(false);
   const { toast } = useToast();
   const { currency, region } = useRegional();
   const { user } = useAuth();
@@ -331,6 +333,22 @@ export default function SkipPage() {
           toast({ variant: 'destructive', title: "Couldn't generate check-in", description: err instanceof Error ? err.message : "Please try again." });
       } finally {
           setIsCheckingIn(false);
+      }
+  }
+
+  const resetTrip = () => {
+      setStep('initial');
+      setSelectedRide(null);
+      setSafetyMessage(null);
+      setMatchedDriver(null);
+  }
+
+  const handleEndTrip = () => {
+      if (matchedDriver) {
+          setIsRateDriverOpen(true);
+      } else {
+          toast({ title: "Trip Completed!", description: "Thanks for riding with SKIP." });
+          resetTrip();
       }
   }
 
@@ -509,7 +527,8 @@ export default function SkipPage() {
                                   {isCheckingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />} Naya Safety Check-In
                               </Button>
                           )}
-                          <Button variant="outline" className="w-full h-14 rounded-2xl font-bold border-red-500/20 text-red-500" onClick={() => { setStep('initial'); setSelectedRide(null); setSafetyMessage(null); setMatchedDriver(null); }}>CANCEL TRIP</Button>
+                          <Button className="w-full h-14 rounded-2xl font-black bg-primary text-white" onClick={handleEndTrip}>END TRIP</Button>
+                          <Button variant="outline" className="w-full h-12 rounded-2xl font-bold border-red-500/20 text-red-500" onClick={resetTrip}>CANCEL TRIP</Button>
                       </div>
                   ) : step === 'itinerary' ? (
                       itinerary ? (
@@ -619,11 +638,21 @@ export default function SkipPage() {
             </SheetContent>
         </Sheet>
 
-        <AppCall 
-            open={!!activeCallTarget} 
-            onOpenChange={(o) => !o && setActiveCallTarget(null)} 
-            target={activeCallTarget} 
+        <AppCall
+            open={!!activeCallTarget}
+            onOpenChange={(o) => !o && setActiveCallTarget(null)}
+            target={activeCallTarget}
         />
+
+        {matchedDriver && (
+            <RateDialog
+              open={isRateDriverOpen}
+              onOpenChange={(o) => { setIsRateDriverOpen(o); if (!o) resetTrip(); }}
+              entityType="driver"
+              entityId={matchedDriver.uid}
+              title={matchedDriver.name}
+            />
+        )}
     </div>
   );
 }

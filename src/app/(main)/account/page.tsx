@@ -37,6 +37,7 @@ import {
     Sparkles,
     Loader2,
     Calendar,
+    Megaphone,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,7 @@ import CreateListingDialog from "@/components/create-listing-dialog";
 import CreateStayDialog from "@/components/create-stay-dialog";
 import CreateEventDialog from "@/components/create-event-dialog";
 import DriverConsoleCard from "@/components/driver-console-card";
+import PromoteDialog from "@/components/promote-dialog";
 import { aiCareerCoach } from "@/app/actions";
 import { getIdToken } from "@/lib/get-id-token";
 
@@ -293,6 +295,7 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
     const [isCreateProductOpen, setIsCreateProductOpen] = useState(false);
     const [isCreateStayOpen, setIsCreateStayOpen] = useState(false);
     const [isCreateEventOpen, setIsCreateEventOpen] = useState(false);
+    const [isPromoteOpen, setIsPromoteOpen] = useState(false);
 
     useEffect(() => {
         if (!user) return;
@@ -379,6 +382,16 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
             </div>
 
             <DriverConsoleCard profile={profile} />
+
+            <Card className="border-primary/20 bg-gradient-to-br from-primary/10 to-transparent backdrop-blur-xl">
+                <CardHeader>
+                    <CardTitle className="text-lg font-headline flex items-center gap-2"><Megaphone className="w-5 h-5 text-primary"/> Promote</CardTitle>
+                    <CardDescription>Pay to run a sponsored ad in Vibes and Messages until your promotion runs out.</CardDescription>
+                </CardHeader>
+                <CardFooter>
+                    <Button className="w-full rounded-xl gap-2 h-14 font-bold text-lg shadow-xl shadow-primary/20" onClick={() => setIsPromoteOpen(true)}><Megaphone className="w-5 h-5"/> Promote Something</Button>
+                </CardFooter>
+            </Card>
 
             <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
                 <CardHeader>
@@ -503,6 +516,7 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
             <CreateListingDialog open={isCreateProductOpen} onOpenChange={setIsCreateProductOpen} profile={profile} />
             <CreateStayDialog open={isCreateStayOpen} onOpenChange={setIsCreateStayOpen} profile={profile} />
             <CreateEventDialog open={isCreateEventOpen} onOpenChange={setIsCreateEventOpen} profile={profile} />
+            <PromoteDialog open={isPromoteOpen} onOpenChange={setIsPromoteOpen} />
         </div>
     );
 };

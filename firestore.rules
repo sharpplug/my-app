@@ -3,6 +3,15 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ratingSum/ratingCount (stays/events/drivers below) are only ever
+    // supposed to change via submitRating's Admin SDK transaction, which
+    // bypasses these rules entirely - this stops an owner from using their
+    // own "update your own listing" permission to inflate their own
+    // rating directly.
+    function noRatingTamper() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ratingSum', 'ratingCount']);
+    }
+
     // Public profile directory. Any signed-in user can look someone up by
     // uid or by handle (via /handles) to send them money; only the owner
     // can create/modify their own profile.
@@ -100,7 +109,8 @@ service cloud.firestore {
         && request.resource.data.price is number
         && request.resource.data.price > 0
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'partner';
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
+      allow update: if request.auth != null && request.auth.uid == resource.data.ownerUid && noRatingTamper();
+      allow delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
     }
 
     // Real host-listed stays (Partner Dashboard's "Become a Host" flow) -
@@ -114,7 +124,16 @@ service cloud.firestore {
         && request.resource.data.pricePerNight is number
         && request.resource.data.pricePerNight > 0
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'partner';
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.hostUid;
+      allow update: if request.auth != null && request.auth.uid == resource.data.hostUid && noRatingTamper();
+      allow delete: if request.auth != null && request.auth.uid == resource.data.hostUid;
+
+      // Star ratings (src/lib/ratings.ts). Only submitRating's Admin SDK
+      // transaction ever writes these - see functions/src/index.ts for the
+      // "did you actually book this" eligibility check.
+      match /reviews/{reviewId} {
+        allow read: if request.auth != null;
+        allow write: if false;
+      }
     }
 
     // Real partner-created events (Partner Dashboard's "Create Event" flow)
@@ -126,7 +145,13 @@ service cloud.firestore {
         && request.resource.data.priceValue is number
         && request.resource.data.priceValue >= 0
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'partner';
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.organizerUid;
+      allow update: if request.auth != null && request.auth.uid == resource.data.organizerUid && noRatingTamper();
+      allow delete: if request.auth != null && request.auth.uid == resource.data.organizerUid;
+
+      match /reviews/{reviewId} {
+        allow read: if request.auth != null;
+        allow write: if false;
+      }
     }
 
     // Skip Driver Console registrations (Partner Dashboard). One profile
@@ -140,8 +165,25 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create, update: if request.auth != null && request.auth.uid == uid
         && request.resource.data.ownerUid == uid
-        && get(/databases/$(database)/documents/users/$(uid)).data.role == 'partner';
+        && get(/databases/$(database)/documents/users/$(uid)).data.role == 'partner'
+        && noRatingTamper();
       allow delete: if request.auth != null && request.auth.uid == uid;
+
+      match /reviews/{reviewId} {
+        allow read: if request.auth != null;
+        allow write: if false;
+      }
+    }
+
+    // Paid, time-boxed promotions (Partner Dashboard's "Promote" flow).
+    // Buying one moves money (a straight platform-revenue purchase), so
+    // creation is Cloud-Function-only via purchaseAd - a client can read
+    // to display active ads (src/lib/ads.ts filters expiresAt > now
+    // itself; there's no server-side cleanup job for expired docs) but
+    // never write one directly.
+    match /ads/{adId} {
+      allow read: if request.auth != null;
+      allow write: if false;
     }
 
     // The Vibes feed. Posts are readable by any signed-in user; only the
