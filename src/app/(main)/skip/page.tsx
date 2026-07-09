@@ -39,10 +39,10 @@ import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
-import { planComplexTrip } from '@/app/actions';
+import { planComplexTrip, planChauffeurFromCalendar, aiSafetyCheckIn } from '@/app/actions';
 import { getIdToken } from '@/lib/get-id-token';
 import { Textarea } from '@/components/ui/textarea';
-import type { PlanComplexTripOutput } from '@/app/actions';
+import type { PlanComplexTripOutput, PlanChauffeurFromCalendarOutput } from '@/app/actions';
 import { Badge } from '@/components/ui/badge';
 import { useRegional } from '@/contexts/language-provider';
 import AppCall, { CallTarget } from '@/components/app-call';
@@ -233,12 +233,16 @@ export default function SkipPage() {
   const [activeTab, setActiveTab] = useState<RideType>('personal');
   const [isSheetOpen, setIsSheetOpen] = useState(true);
   const [itinerary, setItinerary] = useState<PlanComplexTripOutput | null>(null);
+  const [calendarPlan, setCalendarPlan] = useState<PlanChauffeurFromCalendarOutput | null>(null);
+  const [plannerMode, setPlannerMode] = useState<'describe' | 'calendar'>('describe');
   const [selectedRide, setSelectedRide] = useState<RideOption | null>(null);
   const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
   const [isPlanning, startPlanning] = useTransition();
   const [isPaying, setIsPaying] = useState(false);
   const [pickup, setPickup] = useState('Current Location');
   const [destination, setDestination] = useState('');
+  const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const [safetyMessage, setSafetyMessage] = useState<string | null>(null);
   const { toast } = useToast();
   const { currency, region } = useRegional();
   const { user } = useAuth();
@@ -262,12 +266,58 @@ export default function SkipPage() {
           try {
               const idToken = await getIdToken();
               const result = await planComplexTrip(idToken, { request });
+              setCalendarPlan(null);
               setItinerary(result);
-              setStep('itinerary');
           } catch (error) {
               toast({ variant: 'destructive', title: "Planning Failed", description: "Couldn't design your itinerary. Please try again."})
           }
       })
+  }
+
+  const handlePlanFromCalendar = (calendarSchedule: string) => {
+      if (!calendarSchedule.trim()) return;
+      startPlanning(async () => {
+          try {
+              const idToken = await getIdToken();
+              const result = await planChauffeurFromCalendar(idToken, { calendarSchedule });
+              setItinerary(null);
+              setCalendarPlan(result);
+          } catch (error) {
+              toast({ variant: 'destructive', title: "Planning Failed", description: "Couldn't build your chauffeur plan. Please try again."})
+          }
+      })
+  }
+
+  const parseFareToNumber = (fare: string) => parseFloat(fare.replace(/[^0-9.]/g, '')) || 0;
+
+  const handleConfirmPlannedTrip = async (title: string, fare: number) => {
+      if (!user) return;
+      setIsPaying(true);
+      try {
+          await spendFunds(user.uid, title, fare);
+          setItinerary(null);
+          setCalendarPlan(null);
+          setStep('searching');
+          setTimeout(() => setStep('confirmed'), 2500);
+      } catch (err) {
+          toast({ variant: 'destructive', title: "Payment Failed", description: err instanceof Error ? err.message : "Please try again." });
+      } finally {
+          setIsPaying(false);
+      }
+  }
+
+  const handleSafetyCheckIn = async () => {
+      if (!selectedRide) return;
+      setIsCheckingIn(true);
+      try {
+          const idToken = await getIdToken();
+          const result = await aiSafetyCheckIn(idToken, { rideDetails: `Riding with Hassan M. in a ${selectedRide.name}, currently near Downtown, heading to the destination.` });
+          setSafetyMessage(result.statusMessage);
+      } catch (err) {
+          toast({ variant: 'destructive', title: "Couldn't generate check-in", description: err instanceof Error ? err.message : "Please try again." });
+      } finally {
+          setIsCheckingIn(false);
+      }
   }
 
   const handleRideSelect = (ride: RideOption) => {
@@ -429,25 +479,122 @@ export default function SkipPage() {
                                   <span className="text-xs text-muted-foreground">Regional traffic optimization active</span>
                               </div>
                           </div>
-                          <Button variant="outline" className="w-full h-14 rounded-2xl font-bold border-red-500/20 text-red-500" onClick={() => { setStep('initial'); setSelectedRide(null); }}>CANCEL TRIP</Button>
+                          {safetyMessage ? (
+                              <div className="p-4 rounded-2xl bg-green-500/10 border border-green-500/20 space-y-2">
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-green-600 flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Safety Check-In Ready</p>
+                                  <p className="text-sm">{safetyMessage}</p>
+                                  <p className="text-[10px] text-muted-foreground">Copy this to send to a friend or family member.</p>
+                              </div>
+                          ) : (
+                              <Button variant="outline" className="w-full h-12 rounded-2xl font-bold gap-2" onClick={handleSafetyCheckIn} disabled={isCheckingIn}>
+                                  {isCheckingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />} Naya Safety Check-In
+                              </Button>
+                          )}
+                          <Button variant="outline" className="w-full h-14 rounded-2xl font-bold border-red-500/20 text-red-500" onClick={() => { setStep('initial'); setSelectedRide(null); setSafetyMessage(null); }}>CANCEL TRIP</Button>
                       </div>
                   ) : step === 'itinerary' ? (
-                      <div className="space-y-6">
-                          <p className="text-sm font-medium leading-relaxed opacity-70">Tell me where you need to be today. I'll handle the route, the timing, and your SKIP fleet.</p>
-                          <Textarea 
-                            placeholder="e.g. I have a business meeting at 10 AM, then a lunch, and I need to drop a package at the post office by 3 PM."
-                            className="bg-muted border-0 rounded-2xl h-40 text-lg p-6 focus-visible:ring-primary/20"
-                            autoFocus
-                            id="ai-request"
-                          />
-                          <div className="grid grid-cols-2 gap-3">
-                              <Button variant="outline" className="h-14 rounded-2xl font-bold" onClick={() => setStep('initial')}>Back</Button>
-                              <Button className="h-14 rounded-2xl font-black bg-primary text-white" onClick={() => {
-                                  const val = (document.getElementById('ai-request') as HTMLTextAreaElement).value;
-                                  handlePlanTrip(val);
-                              }}>GENERATE PLAN</Button>
+                      itinerary ? (
+                          <div className="space-y-5">
+                              <div className="space-y-3">
+                                  {itinerary.stops.map((stop, i) => (
+                                      <div key={i} className="p-4 rounded-2xl bg-muted/50 border flex gap-3">
+                                          <div className="w-7 h-7 rounded-full bg-primary/10 text-primary font-black text-xs flex items-center justify-center shrink-0">{i + 1}</div>
+                                          <div className="flex-1 min-w-0">
+                                              <p className="font-bold text-sm">{stop.activity}</p>
+                                              <p className="text-xs text-muted-foreground">{stop.location} • {stop.estimated_time}{stop.waiting_time ? ` • wait ${stop.waiting_time}` : ''}</p>
+                                          </div>
+                                      </div>
+                                  ))}
+                              </div>
+                              {itinerary.suggested_restaurants && itinerary.suggested_restaurants.length > 0 && (
+                                  <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20">
+                                      <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-1">Suggested Restaurants</p>
+                                      <p className="text-sm">{itinerary.suggested_restaurants.join(', ')}</p>
+                                  </div>
+                              )}
+                              <div className="p-4 rounded-2xl bg-muted/30 border text-sm">{itinerary.route_summary}</div>
+                              <div className="flex items-center justify-between p-4 rounded-2xl bg-primary/5 border border-primary/20">
+                                  <span className="font-bold text-sm">Estimated Fare</span>
+                                  <span className="font-black text-xl text-primary">{itinerary.estimated_fare}</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                  <Button variant="outline" className="h-14 rounded-2xl font-bold" onClick={() => setItinerary(null)} disabled={isPaying}>Back</Button>
+                                  <Button className="h-14 rounded-2xl font-black bg-primary text-white" onClick={() => handleConfirmPlannedTrip('AI Expedition Plan', parseFareToNumber(itinerary.estimated_fare))} disabled={isPaying}>
+                                      {isPaying ? <Loader2 className="animate-spin mr-2 w-4 h-4" /> : null} Confirm & Dispatch
+                                  </Button>
+                              </div>
                           </div>
-                      </div>
+                      ) : calendarPlan ? (
+                          <div className="space-y-5">
+                              <p className="font-bold text-lg">{calendarPlan.itineraryTitle}</p>
+                              {calendarPlan.daily_plans.map((day, di) => (
+                                  <div key={di} className="space-y-2">
+                                      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{day.date}</p>
+                                      {day.trips.map((trip, ti) => (
+                                          <div key={ti} className="p-4 rounded-2xl bg-muted/50 border">
+                                              <p className="font-bold text-sm">{trip.activity}</p>
+                                              <p className="text-xs text-muted-foreground">{trip.location} • pickup {trip.pickup_time}{trip.waiting_time ? ` • wait ${trip.waiting_time}` : ''}</p>
+                                          </div>
+                                      ))}
+                                  </div>
+                              ))}
+                              <div className="p-4 rounded-2xl bg-muted/30 border text-sm">{calendarPlan.route_summary}</div>
+                              <p className="text-xs text-muted-foreground">{calendarPlan.notification_summary}</p>
+                              <div className="flex items-center justify-between p-4 rounded-2xl bg-primary/5 border border-primary/20">
+                                  <span className="font-bold text-sm">Estimated Fare</span>
+                                  <span className="font-black text-xl text-primary">{calendarPlan.estimated_fare}</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                  <Button variant="outline" className="h-14 rounded-2xl font-bold" onClick={() => setCalendarPlan(null)} disabled={isPaying}>Back</Button>
+                                  <Button className="h-14 rounded-2xl font-black bg-primary text-white" onClick={() => handleConfirmPlannedTrip('VIP Chauffeur Plan', parseFareToNumber(calendarPlan.estimated_fare))} disabled={isPaying}>
+                                      {isPaying ? <Loader2 className="animate-spin mr-2 w-4 h-4" /> : null} Confirm & Dispatch
+                                  </Button>
+                              </div>
+                          </div>
+                      ) : (
+                          <div className="space-y-6">
+                              <Tabs value={plannerMode} onValueChange={(v) => setPlannerMode(v as 'describe' | 'calendar')}>
+                                  <TabsList className="grid w-full grid-cols-2 rounded-2xl p-1.5 h-auto bg-muted">
+                                      <TabsTrigger value="describe" className="rounded-xl py-2 text-xs font-bold">Describe My Day</TabsTrigger>
+                                      <TabsTrigger value="calendar" className="rounded-xl py-2 text-xs font-bold">From My Calendar</TabsTrigger>
+                                  </TabsList>
+                              </Tabs>
+                              {plannerMode === 'describe' ? (
+                                  <>
+                                      <p className="text-sm font-medium leading-relaxed opacity-70">Tell me where you need to be today. I'll handle the route, the timing, and your SKIP fleet.</p>
+                                      <Textarea
+                                        placeholder="e.g. I have a business meeting at 10 AM, then a lunch, and I need to drop a package at the post office by 3 PM."
+                                        className="bg-muted border-0 rounded-2xl h-40 text-lg p-6 focus-visible:ring-primary/20"
+                                        autoFocus
+                                        id="ai-request"
+                                      />
+                                      <div className="grid grid-cols-2 gap-3">
+                                          <Button variant="outline" className="h-14 rounded-2xl font-bold" onClick={() => setStep('initial')}>Back</Button>
+                                          <Button className="h-14 rounded-2xl font-black bg-primary text-white" onClick={() => {
+                                              const val = (document.getElementById('ai-request') as HTMLTextAreaElement).value;
+                                              handlePlanTrip(val);
+                                          }}>GENERATE PLAN</Button>
+                                      </div>
+                                  </>
+                              ) : (
+                                  <>
+                                      <p className="text-sm font-medium leading-relaxed opacity-70">Paste your week's schedule and Naya will build a full VIP chauffeur plan around it.</p>
+                                      <Textarea
+                                        placeholder={"e.g. Monday: 9am team meeting downtown, 1pm client lunch at the marina.\nTuesday: 10am airport pickup for a guest, 6pm dinner event."}
+                                        className="bg-muted border-0 rounded-2xl h-40 text-lg p-6 focus-visible:ring-primary/20"
+                                        id="calendar-request"
+                                      />
+                                      <div className="grid grid-cols-2 gap-3">
+                                          <Button variant="outline" className="h-14 rounded-2xl font-bold" onClick={() => setStep('initial')}>Back</Button>
+                                          <Button className="h-14 rounded-2xl font-black bg-primary text-white" onClick={() => {
+                                              const val = (document.getElementById('calendar-request') as HTMLTextAreaElement).value;
+                                              handlePlanFromCalendar(val);
+                                          }}>GENERATE PLAN</Button>
+                                      </div>
+                                  </>
+                              )}
+                          </div>
+                      )
                   ) : null}
                 </div>
             </SheetContent>
