@@ -6,7 +6,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MessageSquare, Send, AlertTriangle, Trash2, Paperclip, Camera, Loader2, PlayCircle, Image as ImageIcon, Video, X, Sparkles, Phone } from 'lucide-react';
+import { MessageSquare, Send, AlertTriangle, Trash2, Paperclip, Camera, Loader2, PlayCircle, Image as ImageIcon, Video, X, Sparkles, Phone, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 import {
@@ -23,6 +23,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import CameraView from '@/components/camera-view';
 import AppCall, { CallTarget } from './app-call';
+import SendMoneyDialog from '@/components/send-money-dialog';
 
 const mockConversations = [
   {
@@ -103,6 +104,7 @@ export default function MessagesView() {
     const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
+    const [isSendMoneyOpen, setIsSendMoneyOpen] = useState(false);
     const { toast } = useToast();
 
     const selectedConversation = conversations.find(c => c.id === selectedConversationId);
@@ -277,9 +279,14 @@ export default function MessagesView() {
                           </Avatar>
                           <h2 className="text-lg font-semibold">{selectedConversation.name}</h2>
                         </div>
-                        <Button variant="ghost" size="icon" onClick={() => setActiveCallTarget({ name: selectedConversation.name, avatar: selectedConversation.avatar, type: 'user' })}>
-                          <Phone className="w-5 h-5 text-green-500" />
-                        </Button>
+                        <div className="flex items-center">
+                            <Button variant="ghost" size="icon" onClick={() => setIsSendMoneyOpen(true)} title="Send Money">
+                              <Wallet className="w-5 h-5 text-primary" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => setActiveCallTarget({ name: selectedConversation.name, avatar: selectedConversation.avatar, type: 'user' })}>
+                              <Phone className="w-5 h-5 text-green-500" />
+                            </Button>
+                        </div>
                     </div>
                     <ScrollArea className="flex-grow p-4">
                         <div className="space-y-4">
@@ -377,10 +384,30 @@ export default function MessagesView() {
             onUseVideo={(uri) => handleSendMediaFromCamera(uri, 'video')}
             title="Send Media"
         />
-        <AppCall 
-          open={!!activeCallTarget} 
-          onOpenChange={(open) => !open && setActiveCallTarget(null)} 
-          target={activeCallTarget} 
+        <AppCall
+          open={!!activeCallTarget}
+          onOpenChange={(open) => !open && setActiveCallTarget(null)}
+          target={activeCallTarget}
+        />
+        <SendMoneyDialog
+          open={isSendMoneyOpen}
+          onOpenChange={setIsSendMoneyOpen}
+          initialQuery={selectedConversation?.name}
+          onSent={(recipient, sentAmount) => {
+            // These conversations are mock/local data, not real Firestore
+            // threads tied to a uid - so the "receipt" of a send is a local
+            // system message here rather than something the recipient's
+            // client would also see. The transfer itself is real (it ran
+            // through sendFunds); only this in-chat confirmation is a
+            // stand-in for a real messaging backend.
+            handleSendMessage({
+              id: Date.now(),
+              type: 'text',
+              content: `💸 Sent @${recipient.handle} money via Moood Wallet.`,
+              sender: 'You',
+              timestamp: 'Just now',
+            });
+          }}
         />
     </div>
   );
