@@ -18,6 +18,7 @@ import AppCall, { CallTarget } from '@/components/app-call';
 import { useRegional } from '@/contexts/language-provider';
 import { useAuth } from '@/contexts/auth-provider';
 import { spendFunds } from '@/lib/wallet';
+import { subscribeToProducts, type Product } from '@/lib/products';
 import CameraView from '@/components/camera-view';
 
 type MarketplaceItem = {
@@ -30,7 +31,27 @@ type MarketplaceItem = {
     type: 'on-site' | 'virtual' | 'product';
     price: number;
     tryOn?: boolean;
+    /** Set only for real, partner-listed items (src/lib/products.ts) - drives
+     * seller-crediting in spendFunds and the "can't buy your own listing" guard. */
+    productId?: string;
+    ownerUid?: string;
 };
+
+function productToMarketplaceItem(product: Product): MarketplaceItem {
+    return {
+        category: product.category,
+        title: product.title,
+        description: product.description || `By @${product.ownerHandle}`,
+        image: product.image,
+        hint: product.title,
+        providerName: `@${product.ownerHandle}`,
+        type: 'product',
+        price: product.price,
+        tryOn: product.category === 'fashion' || product.category === 'beauty',
+        productId: product.id,
+        ownerUid: product.ownerUid,
+    };
+}
 
 const mockServiceItems: MarketplaceItem[] = [
     { category: 'wellness', title: "Relaxing Massage", description: "60-min session", image: "https://picsum.photos/seed/massage/400/400", hint: "spa massage", providerName: "Serenity Spa", type: 'on-site', price: 250 },
@@ -118,8 +139,10 @@ const TryOnDialog = ({ open, onOpenChange, item }: { open: boolean; onOpenChange
 
 const MarketplaceItemCard = ({ item, onCall }: { item: MarketplaceItem, onCall?: (target: CallTarget) => void }) => {
     const { currency } = useRegional();
+    const { user } = useAuth();
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
     const [isTryOnOpen, setIsTryOnOpen] = useState(false);
+    const isOwnListing = !!item.productId && item.ownerUid === user?.uid;
 
     return (
         <>
@@ -127,6 +150,7 @@ const MarketplaceItemCard = ({ item, onCall }: { item: MarketplaceItem, onCall?:
                 <div className="relative aspect-square w-full bg-muted">
                     <Image src={item.image} alt={item.title} fill className="object-cover" />
                     {item.type && <Badge className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm border-0">{item.type}</Badge>}
+                    {item.productId && <Badge variant="secondary" className="absolute top-2 left-2">Partner Listing</Badge>}
                 </div>
                 <CardHeader className="p-3">
                     <CardTitle className="text-sm font-bold truncate">{item.title}</CardTitle>
@@ -143,7 +167,11 @@ const MarketplaceItemCard = ({ item, onCall }: { item: MarketplaceItem, onCall?:
                     )}
                     <div className="flex gap-2">
                         <Button variant="outline" size="icon" className="shrink-0 rounded-full" onClick={() => onCall?.({ name: item.providerName, type: 'business' })}><Phone className="w-4 h-4 text-green-500" /></Button>
-                        <Button size="sm" className="w-full rounded-full bg-primary" onClick={() => setIsCheckoutOpen(true)}>Get Now</Button>
+                        {isOwnListing ? (
+                            <Button size="sm" className="w-full rounded-full" variant="secondary" disabled>Your Listing</Button>
+                        ) : (
+                            <Button size="sm" className="w-full rounded-full bg-primary" onClick={() => setIsCheckoutOpen(true)}>Get Now</Button>
+                        )}
                     </div>
                 </CardFooter>
             </Card>
@@ -163,7 +191,7 @@ const CheckoutDialog = ({ open, onOpenChange, item }: { open: boolean, onOpenCha
         if (!user) return;
         setIsPending(true);
         try {
-            await spendFunds(user.uid, item.title, item.price);
+            await spendFunds(user.uid, item.title, item.price, item.productId);
             toast({ title: "Order Confirmed!", description: `${currency.symbol} ${item.price} paid from your Moood wallet.` });
             onOpenChange(false);
         } catch (err) {
@@ -211,22 +239,30 @@ export default function ShopPage() {
   const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
 
   useEffect(() => {
     const q = searchParams.get('q');
     if (q) setSearchTerm(q);
   }, [searchParams]);
 
+  useEffect(() => subscribeToProducts(setProducts), []);
+
+  const allItems = useMemo(
+    () => [...products.map(productToMarketplaceItem), ...mockServiceItems],
+    [products]
+  );
+
   const filteredItems = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return mockServiceItems;
-    return mockServiceItems.filter(item =>
+    if (!term) return allItems;
+    return allItems.filter(item =>
         item.title.toLowerCase().includes(term) ||
         item.description.toLowerCase().includes(term) ||
         item.category.toLowerCase().includes(term) ||
         item.providerName.toLowerCase().includes(term)
     );
-  }, [searchTerm]);
+  }, [allItems, searchTerm]);
 
   return (
     <div className="w-full p-4 md:p-6 lg:p-8 space-y-6">
@@ -245,7 +281,7 @@ export default function ShopPage() {
         ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                 {filteredItems.map((item, i) => (
-                    <MarketplaceItemCard key={i} item={item} onCall={setActiveCallTarget} />
+                    <MarketplaceItemCard key={item.productId ?? `mock-${i}`} item={item} onCall={setActiveCallTarget} />
                 ))}
             </div>
         )}

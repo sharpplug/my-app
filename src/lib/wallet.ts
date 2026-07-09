@@ -25,7 +25,7 @@ export type Wallet = {
 
 export type WalletTransaction = {
   id: string;
-  type: "send" | "receive" | "topup" | "swap" | "gift-sent" | "gift-received" | "purchase";
+  type: "send" | "receive" | "topup" | "withdrawal" | "swap" | "gift-sent" | "gift-received" | "purchase" | "sale";
   amount: number;
   fee?: number;
   recipient?: string;
@@ -99,9 +99,16 @@ export async function sendGift(
   await call({ streamerUid: streamer.uid, giftName, price });
 }
 
-export async function spendFunds(uid: string, item: string, amount: number) {
+// `productId` is set only for real, partner-listed marketplace items (see
+// src/lib/products.ts) - when present, the Cloud Function looks up the
+// authoritative price/seller itself and ignores `item`/`amount` entirely,
+// crediting the seller's wallet. Omit it for the legacy static-catalog
+// items (Events/Stays/Skip/Shop's curated list), which still trust the
+// client-supplied amount with no seller to credit - see the SECURITY NOTE
+// in functions/src/index.ts.
+export async function spendFunds(uid: string, item: string, amount: number, productId?: string) {
   const call = httpsCallable(functions, "spendFunds");
-  await call({ item, amount });
+  await call({ item, amount, productId });
 }
 
 // Top-ups are a two-step flow rather than a single trusted call, since this
@@ -123,6 +130,26 @@ export async function initiateTopUp(
 
 export async function simulateTopUpConfirmation(intentId: string): Promise<void> {
   const call = httpsCallable(functions, "simulateTopUpConfirmation");
+  await call({ intentId });
+}
+
+// Withdrawals are the mirror of top-ups: the wallet is debited immediately
+// (it's real, already-trusted internal balance), and confirmation is about
+// whether the payout to the outside rail actually landed - see
+// functions/src/index.ts for the full explanation and the production
+// payoutWebhook contract.
+export async function initiateWithdrawal(
+  amount: number,
+  rail: string,
+  phone?: string
+): Promise<{ intentId: string; method: TopUpMethod }> {
+  const call = httpsCallable(functions, "initiateWithdrawal");
+  const result = await call({ amount, rail, phone });
+  return result.data as { intentId: string; method: TopUpMethod };
+}
+
+export async function simulateWithdrawalConfirmation(intentId: string): Promise<void> {
+  const call = httpsCallable(functions, "simulateWithdrawalConfirmation");
   await call({ intentId });
 }
 

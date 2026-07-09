@@ -24,11 +24,14 @@ const TRANSACTION_FEE_PERCENT = 0.005;
 const MOOOD_TOKEN_RATE = 2;
 const GIFT_PLATFORM_FEE_PERCENT = 0.2;
 const SIGNUP_BONUS_TOKENS = 100;
+const MARKETPLACE_FEE_PERCENT = 0.1;
 
 const walletRef = (uid: string) => db.collection("wallets").doc(uid);
 const transactionsRef = (uid: string) => walletRef(uid).collection("transactions");
 const userRef = (uid: string) => db.collection("users").doc(uid);
 const topupIntentRef = (id: string) => db.collection("topupIntents").doc(id);
+const productRef = (id: string) => db.collection("products").doc(id);
+const withdrawalIntentRef = (id: string) => db.collection("withdrawalIntents").doc(id);
 
 // Every mobile money / bank rail surfaced across the app's four regions
 // (AE, KE, UG, ZA - see src/components/wallet-tab.tsx), mapped to the kind
@@ -209,7 +212,54 @@ export const sendGift = onCall(async (request) => {
 
 export const spendFunds = onCall(async (request) => {
   const uid = requireAuth(request);
-  const { item, amount } = (request.data ?? {}) as { item?: string; amount?: number };
+  const { item, amount, productId } = (request.data ?? {}) as { item?: string; amount?: number; productId?: string };
+
+  // Real marketplace listings (functions/src/index.ts's products collection,
+  // created via the Partner Dashboard's Create Listing flow) have an
+  // authoritative price and a real seller on file, so this path looks both
+  // up server-side instead of trusting the client - the client-supplied
+  // `amount`/`item` are ignored entirely here, they're only used below for
+  // the legacy static-catalog path (Shop's curated items, Events, Stays,
+  // Skip) where no server-side catalog exists yet.
+  if (typeof productId === "string" && productId) {
+    await db.runTransaction(async (tx) => {
+      const productSnap = await tx.get(productRef(productId));
+      if (!productSnap.exists) {
+        throw new HttpsError("not-found", "Listing not found.");
+      }
+      const product = productSnap.data() as { ownerUid: string; title: string; price: number };
+      if (product.ownerUid === uid) {
+        throw new HttpsError("failed-precondition", "You can't buy your own listing.");
+      }
+
+      const buyer = await getWalletBalances(tx, uid);
+      if (product.price > buyer.balance) {
+        throw new HttpsError("failed-precondition", "Insufficient funds.");
+      }
+      const seller = await getWalletBalances(tx, product.ownerUid);
+      if (!seller.exists) {
+        throw new HttpsError("not-found", "Seller wallet not found.");
+      }
+      const sellerShare = product.price * (1 - MARKETPLACE_FEE_PERCENT);
+
+      tx.update(walletRef(uid), { balance: buyer.balance - product.price, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(walletRef(product.ownerUid), { balance: seller.balance + sellerShare, updatedAt: FieldValue.serverTimestamp() });
+      tx.set(transactionsRef(uid).doc(), {
+        type: "purchase",
+        amount: product.price,
+        item: product.title,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(transactionsRef(product.ownerUid).doc(), {
+        type: "sale",
+        amount: sellerShare,
+        item: product.title,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    return { ok: true };
+  }
 
   if (typeof item !== "string" || !item) {
     throw new HttpsError("invalid-argument", "item is required.");
@@ -218,11 +268,13 @@ export const spendFunds = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "amount must be a positive number.");
   }
 
-  // NOTE: `amount` is trusted from the caller because there is no real,
-  // server-side product catalog yet (shop/events/skip prices are static
-  // arrays in the frontend). Once a real catalog exists, look up the
-  // authoritative price by item/productId here instead of trusting the
-  // client-supplied amount.
+  // NOTE: `amount` is trusted from the caller for this legacy path because
+  // Events/Stays/Skip/Shop's curated catalog are still static arrays in the
+  // frontend with no server-side record to check against - unlike the real
+  // `products` catalog above, there's no seller here to credit either
+  // (these are all "sold by Moood" platform items). Migrating each of these
+  // to a real, server-priced catalog (the way `products` now works) closes
+  // this the same way the wallet migration closed client-writable balances.
 
   await db.runTransaction(async (tx) => {
     const wallet = await getWalletBalances(tx, uid);
@@ -441,6 +493,136 @@ export const swapAssets = onCall(async (request) => {
       createdAt: FieldValue.serverTimestamp(),
     });
   });
+
+  return { ok: true };
+});
+
+/**
+ * Withdrawals (moving wallet balance back out to a real card/mobile money/
+ * bank account) are the mirror image of top-ups, with one difference: we
+ * already trust the balance being withdrawn (it's real Moood-internal
+ * value, same as spendFunds/sendFunds), so the wallet is debited immediately
+ * rather than waiting on a payout confirmation. What's still unconfirmed is
+ * whether the aggregator's payout to the user's phone/bank/card actually
+ * lands - if it fails, refundFailedWithdrawal puts the money back.
+ */
+export const initiateWithdrawal = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const { amount, rail, phone } = (request.data ?? {}) as { amount?: number; rail?: string; phone?: string };
+
+  if (typeof amount !== "number" || !(amount > 0)) {
+    throw new HttpsError("invalid-argument", "amount must be a positive number.");
+  }
+  if (typeof rail !== "string" || !rail) {
+    throw new HttpsError("invalid-argument", "rail is required.");
+  }
+  const method = RAIL_METHODS[rail] ?? "card";
+  if (method === "mobile_money" && (typeof phone !== "string" || phone.trim().length < 7)) {
+    throw new HttpsError("invalid-argument", "A valid mobile money phone number is required for this rail.");
+  }
+
+  const intent = withdrawalIntentRef(db.collection("withdrawalIntents").doc().id);
+
+  await db.runTransaction(async (tx) => {
+    const wallet = await getWalletBalances(tx, uid);
+    if (amount > wallet.balance) {
+      throw new HttpsError("failed-precondition", "Insufficient funds.");
+    }
+    tx.update(walletRef(uid), { balance: wallet.balance - amount, updatedAt: FieldValue.serverTimestamp() });
+    tx.set(transactionsRef(uid).doc(), {
+      type: "withdrawal",
+      amount,
+      rail,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.set(intent, {
+      uid,
+      amount,
+      rail,
+      method,
+      phone: phone ?? null,
+      status: "pending",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return { intentId: intent.id, method };
+});
+
+/**
+ * Production webhook contract for the payout side of a real aggregator -
+ * same signature-verification requirement as topUpWebhook, since this is
+ * also an unauthenticated server-to-server callback.
+ */
+export const payoutWebhook = onRequest(async (req, res) => {
+  const secret = process.env.PAYMENT_WEBHOOK_SECRET;
+  const signature = req.get("X-Webhook-Signature");
+
+  if (!secret) {
+    res.status(503).send("Webhook not configured.");
+    return;
+  }
+  if (!signature || !req.rawBody || !verifySignature(req.rawBody, signature, secret)) {
+    res.status(401).send("Invalid signature.");
+    return;
+  }
+
+  const { intentId, status } = (req.body ?? {}) as { intentId?: string; status?: string };
+  if (typeof intentId !== "string" || !intentId) {
+    res.status(400).send("Missing intentId.");
+    return;
+  }
+
+  if (status === "successful") {
+    await withdrawalIntentRef(intentId)
+      .update({ status: "completed", completedAt: FieldValue.serverTimestamp() })
+      .catch(() => {});
+    res.status(200).send("ok");
+    return;
+  }
+
+  await refundFailedWithdrawal(intentId);
+  res.status(200).send("ok");
+});
+
+async function refundFailedWithdrawal(intentId: string): Promise<void> {
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(withdrawalIntentRef(intentId));
+    if (!snap.exists) return;
+    const intent = snap.data() as { uid: string; amount: number; rail: string; status: string };
+    if (intent.status !== "pending") return; // Already resolved - don't refund twice.
+
+    const wallet = await getWalletBalances(tx, intent.uid);
+    tx.update(walletRef(intent.uid), { balance: wallet.balance + intent.amount, updatedAt: FieldValue.serverTimestamp() });
+    tx.set(transactionsRef(intent.uid).doc(), {
+      type: "receive",
+      amount: intent.amount,
+      sender: "Moood (failed withdrawal refund)",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(snap.ref, { status: "failed", completedAt: FieldValue.serverTimestamp() });
+  });
+}
+
+export const simulateWithdrawalConfirmation = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const { intentId } = (request.data ?? {}) as { intentId?: string };
+
+  if (typeof intentId !== "string" || !intentId) {
+    throw new HttpsError("invalid-argument", "intentId is required.");
+  }
+
+  // DEMO STAND-IN, NOT PRODUCTION-SAFE - see simulateTopUpConfirmation above
+  // for the full explanation. This just marks a withdrawal "paid out"
+  // without a real aggregator ever moving money. Delete once payoutWebhook
+  // is receiving real events.
+  const snap = await withdrawalIntentRef(intentId).get();
+  if (!snap.exists || snap.data()?.uid !== uid) {
+    throw new HttpsError("not-found", "Withdrawal not found.");
+  }
+  if (snap.data()?.status === "pending") {
+    await snap.ref.update({ status: "completed", completedAt: FieldValue.serverTimestamp() });
+  }
 
   return { ok: true };
 });

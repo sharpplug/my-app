@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
@@ -32,8 +32,10 @@ import {
     Clock,
     CheckCircle,
     Plus,
-    MapPin
+    MapPin,
+    Trash2,
 } from "lucide-react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -52,6 +54,9 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { subscribeToUserProfile, becomePartner, type UserProfile } from "@/lib/users";
+import { subscribeToTransactions, type WalletTransaction } from "@/lib/wallet";
+import { subscribeToMyProducts, deleteProduct, type Product as ProductType } from "@/lib/products";
+import CreateListingDialog from "@/components/create-listing-dialog";
 
 const SettingsTab = () => {
     const { region, setRegion, language, setLanguage, dataSaver, setDataSaver } = useRegional();
@@ -267,28 +272,65 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
     );
 }
 
-const PartnerDashboardTab = () => {
+const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
     const { currency } = useRegional();
-    
+    const { user } = useAuth();
+    const { toast } = useToast();
+    const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+    const [myProducts, setMyProducts] = useState<ProductType[]>([]);
+    const [isCreateOpen, setIsCreateOpen] = useState(false);
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToTransactions(user.uid, setTransactions);
+    }, [user]);
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToMyProducts(user.uid, setMyProducts);
+    }, [user]);
+
+    // Real numbers pulled from the partner's own wallet transaction history
+    // (Cloud-Function-recorded, not a hardcoded display value) - marketplace
+    // sales come from spendFunds crediting a product's ownerUid, gifting
+    // comes from sendGift's streamer share. Limited to the last 20
+    // transactions (subscribeToTransactions' cap), so this is "recent
+    // earnings" rather than lifetime - a real dashboard would aggregate
+    // server-side instead of scanning a capped client feed.
+    const marketplaceSales = useMemo(() => transactions.filter(tx => tx.type === 'sale').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
+    const liveGifting = useMemo(() => transactions.filter(tx => tx.type === 'gift-received').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
+    const totalEarnings = marketplaceSales + liveGifting;
+    const marketplacePct = totalEarnings > 0 ? Math.round((marketplaceSales / totalEarnings) * 100) : 0;
+    const giftingPct = totalEarnings > 0 ? 100 - marketplacePct : 0;
+
+    const handleDeleteListing = async (productId: string) => {
+        try {
+            await deleteProduct(productId);
+            toast({ title: "Listing Removed" });
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Couldn't remove listing", description: err instanceof Error ? err.message : "Please try again." });
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
                 <Card className="bg-zinc-950 text-white border-white/5 shadow-2xl">
                     <CardHeader className="p-4 pb-0">
-                        <CardTitle className="text-[10px] uppercase tracking-tighter opacity-50 flex items-center gap-1.5"><BarChart className="w-3 h-3"/> Total Earnings</CardTitle>
+                        <CardTitle className="text-[10px] uppercase tracking-tighter opacity-50 flex items-center gap-1.5"><BarChart className="w-3 h-3"/> Recent Earnings</CardTitle>
                     </CardHeader>
                     <CardContent className="p-4 pt-2">
-                        <p className="text-2xl font-bold font-headline tracking-tighter">{currency.symbol} 4,250</p>
-                        <Badge className="bg-green-500/20 text-green-400 border-0 mt-1 text-[8px]">+12% this week</Badge>
+                        <p className="text-2xl font-bold font-headline tracking-tighter">{currency.symbol} {totalEarnings.toFixed(2)}</p>
+                        <p className="text-[9px] text-white/40 mt-1">From your wallet's sale + gift history</p>
                     </CardContent>
                 </Card>
                 <Card className="bg-zinc-950 text-white border-white/5 shadow-2xl">
                     <CardHeader className="p-4 pb-0">
-                        <CardTitle className="text-[10px] uppercase tracking-tighter opacity-50 flex items-center gap-1.5"><Users className="w-3 h-3"/> Global Reach</CardTitle>
+                        <CardTitle className="text-[10px] uppercase tracking-tighter opacity-50 flex items-center gap-1.5"><Box className="w-3 h-3"/> Active Listings</CardTitle>
                     </CardHeader>
                     <CardContent className="p-4 pt-2">
-                        <p className="text-2xl font-bold font-headline tracking-tighter">18.4k</p>
-                        <Badge className="bg-primary/20 text-primary border-0 mt-1 text-[8px]">Top 5% in Region</Badge>
+                        <p className="text-2xl font-bold font-headline tracking-tighter">{myProducts.length}</p>
+                        <Badge className="bg-primary/20 text-primary border-0 mt-1 text-[8px]">Live on Marketplace</Badge>
                     </CardContent>
                 </Card>
             </div>
@@ -299,48 +341,58 @@ const PartnerDashboardTab = () => {
                     <CardDescription>Scale your operations in the Global South.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="p-4 rounded-2xl bg-background/50 border border-white/5 flex items-center justify-between group cursor-pointer hover:border-primary/30 transition-all">
+                    <div className="p-4 rounded-2xl bg-background/50 border border-white/5 flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-amber-500/10 rounded-lg text-amber-500"><Video className="w-5 h-5"/></div>
-                            <div><p className="font-bold text-sm">Live Sales Sync</p><p className="text-[10px] text-muted-foreground">3 scheduled sessions</p></div>
+                            <div><p className="font-bold text-sm">Live Sales Sync</p><p className="text-[10px] text-muted-foreground">Go live from Vibes to sell your listings</p></div>
                         </div>
-                        <Badge variant="outline" className="text-[9px] group-hover:bg-primary group-hover:text-white transition-colors">Manage</Badge>
+                        <Badge variant="outline" className="text-[9px]">Vibes</Badge>
                     </div>
-                    <div className="p-4 rounded-2xl bg-background/50 border border-white/5 flex items-center justify-between group cursor-pointer hover:border-primary/30 transition-all">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500"><Box className="w-5 h-5"/></div>
-                            <div><p className="font-bold text-sm">Inventory Tracking</p><p className="text-[10px] text-muted-foreground">12 products active</p></div>
+                    {myProducts.length === 0 ? (
+                        <div className="p-4 rounded-2xl bg-background/50 border border-white/5 text-center">
+                            <p className="text-sm font-bold">No listings yet</p>
+                            <p className="text-[10px] text-muted-foreground mt-1">Create your first product below - it shows up on the Shop marketplace immediately.</p>
                         </div>
-                        <Badge variant="outline" className="text-[9px]">Synced</Badge>
-                    </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {myProducts.map((product) => (
+                                <div key={product.id} className="p-3 rounded-2xl bg-background/50 border border-white/5 flex items-center gap-3">
+                                    <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-muted"><Image src={product.image} alt={product.title} fill className="object-cover" /></div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-bold text-sm truncate">{product.title}</p>
+                                        <p className="text-[10px] text-muted-foreground">{currency.symbol} {product.price}</p>
+                                    </div>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive shrink-0" onClick={() => handleDeleteListing(product.id)}><Trash2 className="w-4 h-4" /></Button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </CardContent>
                 <CardFooter>
-                    <Button className="w-full rounded-xl gap-2 h-14 font-bold text-lg shadow-xl shadow-primary/20"><Plus className="w-5 h-5"/> Create New Listing</Button>
+                    <Button className="w-full rounded-xl gap-2 h-14 font-bold text-lg shadow-xl shadow-primary/20" onClick={() => setIsCreateOpen(true)}><Plus className="w-5 h-5"/> Create New Listing</Button>
                 </CardFooter>
             </Card>
 
             <Card className="border-white/10 bg-card/50 overflow-hidden backdrop-blur-xl">
                 <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-bold flex items-center gap-2"><PieChart className="w-4 h-4 text-primary"/> Regional Sales Mix</CardTitle>
+                    <CardTitle className="text-sm font-bold flex items-center gap-2"><PieChart className="w-4 h-4 text-primary"/> Earnings Mix</CardTitle>
+                    <CardDescription className="text-xs">Real split from your wallet transaction history.</CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
-                    <div className="flex items-center gap-2 p-4 border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <div className="flex items-center gap-2 p-4 border-b border-white/5">
                         <div className="w-2 h-2 rounded-full bg-primary" />
-                        <span className="text-xs flex-1">Global Services</span>
-                        <span className="text-xs font-bold tabular-nums">65%</span>
+                        <span className="text-xs flex-1">Marketplace Sales</span>
+                        <span className="text-xs font-bold tabular-nums">{marketplacePct}%</span>
                     </div>
-                    <div className="flex items-center gap-2 p-4 border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <div className="flex items-center gap-2 p-4">
                         <div className="w-2 h-2 rounded-full bg-amber-500" />
                         <span className="text-xs flex-1">Live Gifting</span>
-                        <span className="text-xs font-bold tabular-nums">20%</span>
-                    </div>
-                    <div className="flex items-center gap-2 p-4 hover:bg-white/5 transition-colors">
-                        <div className="w-2 h-2 rounded-full bg-indigo-500" />
-                        <span className="text-xs flex-1">Ad Revenue</span>
-                        <span className="text-xs font-bold tabular-nums">15%</span>
+                        <span className="text-xs font-bold tabular-nums">{giftingPct}%</span>
                     </div>
                 </CardContent>
             </Card>
+
+            <CreateListingDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} profile={profile} />
         </div>
     );
 };
@@ -458,7 +510,7 @@ export default function AccountPage() {
 
             {isPartner && (
                 <TabsContent value="partner" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <PartnerDashboardTab />
+                    <PartnerDashboardTab profile={profile} />
                 </TabsContent>
             )}
 

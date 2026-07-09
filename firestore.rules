@@ -53,6 +53,34 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Withdrawal intents (moving wallet balance back out) - the mirror of
+    // topupIntents above. initiateWithdrawal (Admin SDK) already debited
+    // the wallet by the time this doc exists, so it's read-only from the
+    // client for the same reason.
+    match /withdrawalIntents/{intentId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow write: if false;
+    }
+
+    // Real partner marketplace listings (Shop's Create Listing flow).
+    // Unlike wallet writes, listing a product doesn't move money, so a
+    // direct client write is fine as long as: you can only list as
+    // yourself, the price is a real positive number, and you're actually a
+    // partner (role check via a get() lookup on your own profile - partners
+    // are granted that role by becomePartner() in src/lib/users.ts).
+    // Buying a listing (spendFunds with a productId) is the part that
+    // moves money and is Cloud-Function-only, same as every other wallet
+    // mutation.
+    match /products/{productId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.price is number
+        && request.resource.data.price > 0
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'partner';
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
+    }
+
     // The Vibes feed. Posts are readable by any signed-in user; only the
     // author can create/delete their own post. Likes/waves are the one
     // exception to "author only" - any signed-in user may flip their own

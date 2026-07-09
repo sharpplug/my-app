@@ -22,6 +22,7 @@ import {
     CheckCircle2,
     X,
     CreditCard,
+    Banknote,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -44,6 +45,8 @@ import {
     sendFunds,
     initiateTopUp,
     simulateTopUpConfirmation,
+    initiateWithdrawal,
+    simulateWithdrawalConfirmation,
     swapAssets,
     TRANSACTION_FEE_PERCENT,
     MOOOD_TOKEN_RATE,
@@ -61,14 +64,16 @@ function formatTxTime(tx: WalletTransaction) {
 }
 
 function TransactionRow({ tx, currencySymbol }: { tx: WalletTransaction; currencySymbol: string }) {
-    const isCredit = tx.type === 'topup' || tx.type === 'receive' || tx.type === 'gift-received' || (tx.type === 'swap' && tx.direction === 'tokenToCash');
+    const isCredit = tx.type === 'topup' || tx.type === 'receive' || tx.type === 'gift-received' || tx.type === 'sale' || (tx.type === 'swap' && tx.direction === 'tokenToCash');
     const label =
         tx.type === 'send' ? `Sent to @${tx.recipient}` :
         tx.type === 'receive' ? `Received from @${tx.sender}` :
         tx.type === 'topup' ? `Top Up via ${tx.rail}` :
+        tx.type === 'withdrawal' ? `Withdrew to ${tx.rail}` :
         tx.type === 'gift-sent' ? `Sent ${tx.giftName} to @${tx.recipient}` :
         tx.type === 'gift-received' ? `${tx.giftName} from @${tx.sender}` :
         tx.type === 'purchase' ? `Purchased ${tx.item}` :
+        tx.type === 'sale' ? `Sold ${tx.item}` :
         tx.direction === 'cashToToken' ? 'Swapped cash for MOOOD' : 'Swapped MOOOD for cash';
 
     return (
@@ -104,6 +109,7 @@ export default function WalletTab() {
 
     const [isTransferOpen, setIsTransferOpen] = useState(false);
     const [isTopUpOpen, setIsTopUpOpen] = useState(false);
+    const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
     const [isSwapOpen, setIsSwapOpen] = useState(false);
 
     const [myProfile, setMyProfile] = useState<UserProfile | null>(null);
@@ -117,6 +123,10 @@ export default function WalletTab() {
     const [selectedRail, setSelectedRail] = useState("");
     const [topUpPhone, setTopUpPhone] = useState("");
     const [topUpStage, setTopUpStage] = useState<"form" | "confirming">("form");
+    const [withdrawAmount, setWithdrawAmount] = useState("");
+    const [selectedWithdrawRail, setSelectedWithdrawRail] = useState("");
+    const [withdrawPhone, setWithdrawPhone] = useState("");
+    const [withdrawStage, setWithdrawStage] = useState<"form" | "confirming">("form");
     const [swapAmount, setSwapAmount] = useState("");
     const [swapDirection, setSwapDirection] = useState<"cashToToken" | "tokenToCash">("cashToToken");
 
@@ -213,12 +223,25 @@ export default function WalletTab() {
         [regionalPaymentRails, selectedRail]
     );
 
+    const selectedWithdrawRailInfo = useMemo(
+        () => regionalPaymentRails.find(r => r.name === selectedWithdrawRail) ?? regionalPaymentRails[0],
+        [regionalPaymentRails, selectedWithdrawRail]
+    );
+
     const openTopUp = () => {
         setSelectedRail(regionalPaymentRails[0].name);
         setTopUpPhone("");
         setTopUpAmount("");
         setTopUpStage("form");
         setIsTopUpOpen(true);
+    };
+
+    const openWithdraw = () => {
+        setSelectedWithdrawRail(regionalPaymentRails[0].name);
+        setWithdrawPhone("");
+        setWithdrawAmount("");
+        setWithdrawStage("form");
+        setIsWithdrawOpen(true);
     };
 
     const resetTransferDialog = () => {
@@ -296,6 +319,48 @@ export default function WalletTab() {
         });
     };
 
+    const handleWithdraw = () => {
+        if (!user) return;
+        const numAmount = parseFloat(withdrawAmount);
+        if (isNaN(numAmount) || numAmount <= 0) {
+            toast({ variant: 'destructive', title: "Invalid Amount" });
+            return;
+        }
+        if (numAmount > balance) {
+            toast({ variant: 'destructive', title: "Insufficient Funds", description: `Your balance is ${currency.symbol} ${balance.toFixed(2)}.` });
+            return;
+        }
+        if (selectedWithdrawRailInfo.method === 'mobile_money' && withdrawPhone.trim().length < 7) {
+            toast({ variant: 'destructive', title: "Phone Number Required", description: `Enter the number linked to your ${selectedWithdrawRailInfo.name} account.` });
+            return;
+        }
+
+        startTransition(async () => {
+            try {
+                const { intentId } = await initiateWithdrawal(
+                    numAmount,
+                    selectedWithdrawRailInfo.name,
+                    selectedWithdrawRailInfo.method === 'mobile_money' ? withdrawPhone : undefined
+                );
+                setWithdrawStage("confirming");
+
+                // Demo stand-in - see the matching comment on handleTopUp and
+                // functions/src/index.ts's simulateWithdrawalConfirmation.
+                await new Promise((resolve) => setTimeout(resolve, 2200));
+                await simulateWithdrawalConfirmation(intentId);
+
+                setIsWithdrawOpen(false);
+                setWithdrawStage("form");
+                setWithdrawAmount("");
+                setWithdrawPhone("");
+                toast({ title: "Withdrawal Sent!", description: `${currency.symbol} ${numAmount.toFixed(2)} is on its way to ${selectedWithdrawRailInfo.name}.` });
+            } catch (err) {
+                setWithdrawStage("form");
+                toast({ variant: 'destructive', title: "Withdrawal Failed", description: err instanceof Error ? err.message : "Please try again." });
+            }
+        });
+    };
+
     const handleSwap = () => {
         if (!user) return;
         const numAmount = parseFloat(swapAmount);
@@ -346,12 +411,15 @@ export default function WalletTab() {
                         )}
                         <p className="text-[10px] mt-2 text-white/60">P2P Transfers enabled • 0.5% Global Fee</p>
                     </CardContent>
-                    <CardFooter className="flex gap-2">
-                        <Button variant="secondary" className="w-full bg-white/10 hover:bg-white/20 text-white border-0" onClick={() => setIsTransferOpen(true)} disabled={!isWalletReady}>
-                            <ArrowUpRight className="w-4 h-4 mr-2" /> Send
+                    <CardFooter className="grid grid-cols-3 gap-2">
+                        <Button variant="secondary" className="bg-white/10 hover:bg-white/20 text-white border-0 px-2" onClick={() => setIsTransferOpen(true)} disabled={!isWalletReady}>
+                            <ArrowUpRight className="w-4 h-4 mr-1.5" /> Send
                         </Button>
-                        <Button variant="secondary" className="w-full bg-white/10 hover:bg-white/20 text-white border-0" onClick={openTopUp} disabled={!isWalletReady}>
-                            <Plus className="w-4 h-4 mr-2" /> Top Up
+                        <Button variant="secondary" className="bg-white/10 hover:bg-white/20 text-white border-0 px-2" onClick={openTopUp} disabled={!isWalletReady}>
+                            <Plus className="w-4 h-4 mr-1.5" /> Top Up
+                        </Button>
+                        <Button variant="secondary" className="bg-white/10 hover:bg-white/20 text-white border-0 px-2" onClick={openWithdraw} disabled={!isWalletReady || balance <= 0}>
+                            <Banknote className="w-4 h-4 mr-1.5" /> Withdraw
                         </Button>
                     </CardFooter>
                 </Card>
@@ -546,6 +614,63 @@ export default function WalletTab() {
                                         : 'Confirming with your bank...'}
                                 </p>
                                 <p className="text-xs text-zinc-400">{currency.symbol} {parseFloat(topUpAmount || "0").toFixed(2)} via {selectedRailInfo.name}</p>
+                            </div>
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isWithdrawOpen} onOpenChange={(open) => { if (!open && withdrawStage === 'form') setIsWithdrawOpen(false); }}>
+                <DialogContent className="max-w-md sm:rounded-[2rem] border-white/10 bg-zinc-950 text-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-headline text-2xl">Withdraw Balance</DialogTitle>
+                        <DialogDescription className="text-zinc-400">Send your balance out to a mobile money account, card, or bank. Available: {currency.symbol} {balance.toFixed(2)}.</DialogDescription>
+                    </DialogHeader>
+                    {withdrawStage === 'form' ? (
+                        <>
+                            <div className="space-y-6 py-6">
+                                <div className="space-y-2">
+                                    <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">Send To</Label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {regionalPaymentRails.map(rail => (
+                                            <button
+                                                key={rail.name}
+                                                type="button"
+                                                onClick={() => setSelectedWithdrawRail(rail.name)}
+                                                className={cn(
+                                                    "flex items-center gap-2 p-3 rounded-xl border text-left transition-colors",
+                                                    selectedWithdrawRail === rail.name ? "border-primary bg-primary/10" : "border-white/10 bg-white/5 hover:border-white/20"
+                                                )}
+                                            >
+                                                <rail.icon className="w-4 h-4 shrink-0" />
+                                                <span className="text-xs font-bold leading-tight">{rail.name}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">Amount ({currency.symbol})</Label>
+                                    <Input type="number" placeholder="0.00" className="bg-white/5 border-white/10 h-14 text-2xl font-bold rounded-xl" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} />
+                                </div>
+                                {selectedWithdrawRailInfo.method === 'mobile_money' && (
+                                    <div className="space-y-2">
+                                        <Label className="text-zinc-400 text-xs uppercase font-bold tracking-widest">{selectedWithdrawRailInfo.name} Phone Number</Label>
+                                        <Input type="tel" placeholder="e.g. 07XX XXX XXX" className="bg-white/5 border-white/10 h-12 rounded-xl" value={withdrawPhone} onChange={e => setWithdrawPhone(e.target.value)} />
+                                    </div>
+                                )}
+                            </div>
+                            <DialogFooter>
+                                <Button className="w-full h-14 text-lg font-bold rounded-xl" onClick={handleWithdraw} disabled={isPending || !withdrawAmount}>
+                                    {isPending ? <Loader2 className="animate-spin mr-2"/> : <Banknote className="mr-2"/>} Withdraw to {selectedWithdrawRailInfo.name}
+                                </Button>
+                            </DialogFooter>
+                        </>
+                    ) : (
+                        <div className="py-10 flex flex-col items-center text-center gap-4">
+                            <Loader2 className="w-10 h-10 animate-spin text-primary" />
+                            <div className="space-y-1.5">
+                                <p className="font-bold leading-snug">Sending to {selectedWithdrawRailInfo.name}...</p>
+                                <p className="text-xs text-zinc-400">{currency.symbol} {parseFloat(withdrawAmount || "0").toFixed(2)}</p>
                             </div>
                         </div>
                     )}
