@@ -7,19 +7,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Megaphone, Camera, X } from "lucide-react";
+import { Loader2, Megaphone, Camera, X, Star, Check } from "lucide-react";
 import Image from "next/image";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth-provider";
 import { useRegional } from "@/contexts/language-provider";
-import { purchaseAd, type AdTargetType } from "@/lib/ads";
+import { purchaseAd, TIER_INFO, type AdTargetType, type AdTier } from "@/lib/ads";
 import { subscribeToMyProducts, type Product } from "@/lib/products";
 import { subscribeToMyStays, type HostedStay } from "@/lib/stays";
 import { subscribeToMyEvents, type HostedEvent } from "@/lib/events";
+import { INTEREST_TAGS } from "@/lib/interests";
 import CameraView from "@/components/camera-view";
 
 const DURATION_OPTIONS = [1, 3, 7, 14];
-const PRICE_PER_DAY = 20;
+const TIER_ORDER: AdTier[] = ["basic", "featured", "premium"];
 
 type PickableListing = { key: string; targetType: AdTargetType; targetId: string; title: string; image: string; linkPath: string };
 
@@ -38,6 +40,8 @@ export default function PromoteDialog({ open, onOpenChange }: { open: boolean; o
   const [photo, setPhoto] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [durationDays, setDurationDays] = useState(3);
+  const [tier, setTier] = useState<AdTier>("basic");
+  const [interestTags, setInterestTags] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -60,10 +64,15 @@ export default function PromoteDialog({ open, onOpenChange }: { open: boolean; o
   ], [myProducts, myStays, myEvents]);
 
   const selectedListing = listings.find((l) => l.key === selectedKey);
-  const cost = durationDays * PRICE_PER_DAY;
+  const cost = durationDays * TIER_INFO[tier].pricePerDay;
+
+  const toggleInterest = (tag: string) => {
+    setInterestTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
+  };
 
   const reset = () => {
-    setSelectedKey("custom"); setTitle(""); setDescription(""); setLinkPath("/shop"); setPhoto(null); setDurationDays(3);
+    setSelectedKey("custom"); setTitle(""); setDescription(""); setLinkPath("/shop"); setPhoto(null);
+    setDurationDays(3); setTier("basic"); setInterestTags([]);
   };
 
   const handlePromote = async () => {
@@ -90,8 +99,10 @@ export default function PromoteDialog({ open, onOpenChange }: { open: boolean; o
         targetId: selectedListing?.targetId,
         linkPath: finalLinkPath,
         durationDays,
+        tier,
+        interestTags,
       });
-      toast({ title: "You're Promoted!", description: `"${finalTitle}" is now running as a sponsored ad for ${durationDays} day${durationDays > 1 ? "s" : ""}.` });
+      toast({ title: "You're Promoted!", description: `"${finalTitle}" is now running as a ${TIER_INFO[tier].label} promotion for ${durationDays} day${durationDays > 1 ? "s" : ""}.` });
       reset();
       onOpenChange(false);
     } catch (err) {
@@ -107,7 +118,7 @@ export default function PromoteDialog({ open, onOpenChange }: { open: boolean; o
         <DialogContent className="sm:rounded-[2rem] max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Megaphone className="w-5 h-5 text-primary" /> Promote</DialogTitle>
-            <DialogDescription>Run a paid ad in the app - it shows up in Vibes and Messages until your promotion runs out.</DialogDescription>
+            <DialogDescription>Run a paid ad in the app - it disappears automatically once your promotion runs out.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
@@ -159,6 +170,69 @@ export default function PromoteDialog({ open, onOpenChange }: { open: boolean; o
             )}
 
             <div className="space-y-2">
+              <Label>Payment Tier</Label>
+              <div className="space-y-2">
+                {TIER_ORDER.map((t) => {
+                  const info = TIER_INFO[t];
+                  const isSelected = tier === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setTier(t)}
+                      className={cn(
+                        "w-full p-3 rounded-2xl border text-left transition-colors",
+                        isSelected ? "border-primary bg-primary/10" : "border-white/10 bg-muted/30"
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-sm">{info.label}</span>
+                          <div className="flex items-center">
+                            {Array.from({ length: 3 }).map((_, i) => (
+                              <Star key={i} className={cn("w-3 h-3", i < info.stars ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30")} />
+                            ))}
+                          </div>
+                        </div>
+                        <span className="font-black text-sm text-primary">{currency.symbol} {info.pricePerDay}/day</span>
+                      </div>
+                      <ul className="mt-1.5 space-y-0.5">
+                        {info.benefits.map((b) => (
+                          <li key={b} className="text-[10px] text-muted-foreground flex items-start gap-1">
+                            <Check className="w-3 h-3 text-primary shrink-0 mt-0.5" /> {b}
+                          </li>
+                        ))}
+                      </ul>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Target Audience (optional)</Label>
+              <p className="text-[10px] text-muted-foreground -mt-1">Tag interests to show your ad first to users into those things. Leave blank to reach everyone.</p>
+              <div className="flex flex-wrap gap-1.5">
+                {INTEREST_TAGS.map((tag) => {
+                  const isSelected = interestTags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => toggleInterest(tag)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-full border text-xs font-bold transition-colors",
+                        isSelected ? "border-primary bg-primary/10 text-primary" : "border-white/10 bg-muted/30 text-muted-foreground"
+                      )}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
               <Label>Duration</Label>
               <div className="grid grid-cols-4 gap-2">
                 {DURATION_OPTIONS.map((d) => (
@@ -169,7 +243,7 @@ export default function PromoteDialog({ open, onOpenChange }: { open: boolean; o
                     className={`p-3 rounded-xl border text-center transition-colors ${durationDays === d ? "border-primary bg-primary/10" : "border-white/10 bg-muted/30"}`}
                   >
                     <p className="font-bold text-sm">{d}d</p>
-                    <p className="text-[10px] text-muted-foreground">{currency.symbol} {d * PRICE_PER_DAY}</p>
+                    <p className="text-[10px] text-muted-foreground">{currency.symbol} {d * TIER_INFO[tier].pricePerDay}</p>
                   </button>
                 ))}
               </div>

@@ -26,6 +26,9 @@ import CameraView from '@/components/camera-view';
 import AppCall, { CallTarget } from './app-call';
 import SendMoneyDialog from '@/components/send-money-dialog';
 import { useActiveAds, type Ad } from '@/lib/ads';
+import AdTierBadge from '@/components/ad-tier-badge';
+import { useAuth } from '@/contexts/auth-provider';
+import { subscribeToUserProfile } from '@/lib/users';
 
 const mockConversations = [
   {
@@ -96,7 +99,10 @@ const AdMessage = ({ ad }: { ad: Ad }) => {
                             </div>
                         )}
                         <div className="min-w-0 flex-1">
-                            <p className="text-xs text-primary font-semibold">SPONSORED</p>
+                            <div className="flex items-center gap-1.5">
+                                <p className="text-xs text-primary font-semibold">SPONSORED</p>
+                                <AdTierBadge tier={ad.tier} />
+                            </div>
                             <p className="text-sm font-medium truncate">{ad.title}</p>
                             <p className="text-xs text-primary/80 truncate">{ad.description}</p>
                         </div>
@@ -121,7 +127,14 @@ export default function MessagesView() {
     const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
     const [isSendMoneyOpen, setIsSendMoneyOpen] = useState(false);
     const { toast } = useToast();
-    const activeAds = useActiveAds();
+    const { user } = useAuth();
+    const [interests, setInterests] = useState<string[]>([]);
+    const activeAds = useActiveAds('messages', interests);
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToUserProfile(user.uid, (profile) => setInterests(profile?.interests ?? []));
+    }, [user]);
 
     const selectedConversation = conversations.find(c => c.id === selectedConversationId);
 

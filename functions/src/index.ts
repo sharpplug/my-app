@@ -52,6 +52,33 @@ const DRIVER_FEE_PERCENT = 0.15;
 const AD_PRICE_PER_DAY = 20;
 const AD_MAX_DAYS = 14;
 
+export type AdTier = "basic" | "featured" | "premium";
+
+// Real payment tiers for purchaseAd - price, cross-vertical reach, and
+// verification stars are all computed server-side from `tier` so a client
+// can never buy premium-grade reach at basic-grade price.
+const AD_TIER_MULTIPLIER: Record<AdTier, number> = { basic: 1, featured: 1.75, premium: 3 };
+const AD_TIER_STARS: Record<AdTier, number> = { basic: 1, featured: 2, premium: 3 };
+const HOME_VERTICAL_BY_TARGET: Record<string, string> = {
+  product: "shop",
+  stay: "stays",
+  event: "events",
+  driver: "skip",
+  external: "vibes",
+};
+
+/** Basic only reaches the vertical its target naturally belongs to (a
+ * product ad shows in Shop, a driver ad shows in Skip, ...). Featured adds
+ * the Vibes feed on top of that. Premium runs everywhere - every vertical,
+ * regardless of target type - which is the real benefit buyers are paying
+ * the 3x rate for. */
+function verticalsForTier(tier: AdTier, targetType: string): string[] {
+  const home = HOME_VERTICAL_BY_TARGET[targetType] ?? "vibes";
+  if (tier === "basic") return [home];
+  if (tier === "featured") return Array.from(new Set([home, "vibes"]));
+  return ["vibes", "shop", "events", "stays", "skip", "messages"];
+}
+
 const walletRef = (uid: string) => db.collection("wallets").doc(uid);
 const transactionsRef = (uid: string) => walletRef(uid).collection("transactions");
 const userRef = (uid: string) => db.collection("users").doc(uid);
@@ -1018,7 +1045,7 @@ export const submitRating = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async
 export const purchaseAd = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
   await enforceRateLimit(uid, "purchaseAd", 5, 60_000);
-  const { title, description, image, targetType, targetId, linkPath, durationDays } = (request.data ?? {}) as {
+  const { title, description, image, targetType, targetId, linkPath, durationDays, tier, interestTags } = (request.data ?? {}) as {
     title?: string;
     description?: string;
     image?: string;
@@ -1026,6 +1053,8 @@ export const purchaseAd = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
     targetId?: string;
     linkPath?: string;
     durationDays?: number;
+    tier?: AdTier;
+    interestTags?: string[];
   };
 
   if (typeof title !== "string" || !title.trim()) {
@@ -1037,8 +1066,17 @@ export const purchaseAd = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
   if (typeof durationDays !== "number" || !Number.isInteger(durationDays) || durationDays < 1 || durationDays > AD_MAX_DAYS) {
     throw new HttpsError("invalid-argument", `durationDays must be a whole number from 1 to ${AD_MAX_DAYS}.`);
   }
+  if (tier !== "basic" && tier !== "featured" && tier !== "premium") {
+    throw new HttpsError("invalid-argument", "tier must be 'basic', 'featured', or 'premium'.");
+  }
 
-  const cost = durationDays * AD_PRICE_PER_DAY;
+  const safeTargetType = targetType ?? "external";
+  const safeInterestTags = Array.isArray(interestTags)
+    ? interestTags.filter((t): t is string => typeof t === "string").slice(0, 15)
+    : [];
+  const verticals = verticalsForTier(tier, safeTargetType);
+  const stars = AD_TIER_STARS[tier];
+  const cost = Math.round(durationDays * AD_PRICE_PER_DAY * AD_TIER_MULTIPLIER[tier]);
   const handle = await requireHandle(uid);
   const adRef = adsCol().doc();
 
@@ -1052,7 +1090,7 @@ export const purchaseAd = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
     tx.set(transactionsRef(uid).doc(), {
       type: "purchase",
       amount: cost,
-      item: `Ad: ${title} (${durationDays}d)`,
+      item: `Ad: ${title} (${tier}, ${durationDays}d)`,
       createdAt: FieldValue.serverTimestamp(),
     });
     tx.set(adRef, {
@@ -1061,15 +1099,24 @@ export const purchaseAd = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
       title: title.trim(),
       description: (description ?? "").trim(),
       image: image ?? null,
-      targetType: targetType ?? "external",
+      targetType: safeTargetType,
       targetId: targetId ?? null,
       linkPath,
       durationDays,
+      tier,
+      stars,
+      verticals,
+      interestTags: safeInterestTags,
       cost,
       createdAt: FieldValue.serverTimestamp(),
       expiresAt: Timestamp.fromMillis(Date.now() + durationDays * 86_400_000),
     });
-    notify(tx, uid, "Your Ad Is Live!", `"${title}" is now promoted in the app for ${durationDays} day${durationDays > 1 ? "s" : ""}.`);
+    notify(
+      tx,
+      uid,
+      "Your Ad Is Live!",
+      `"${title}" is now running as a ${tier} promotion across ${verticals.length} vertical${verticals.length > 1 ? "s" : ""} for ${durationDays} day${durationDays > 1 ? "s" : ""}.`
+    );
   });
 
   return { ok: true, adId: adRef.id };

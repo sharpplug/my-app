@@ -52,6 +52,10 @@ import dynamic from 'next/dynamic';
 import { Skeleton } from '@/components/ui/skeleton';
 import { REGION_CENTERS } from '@/lib/catalog-data';
 import RateDialog from '@/components/rate-dialog';
+import { useActiveAds, type Ad } from '@/lib/ads';
+import AdTierBadge from '@/components/ad-tier-badge';
+import { subscribeToUserProfile } from '@/lib/users';
+import Link from 'next/link';
 
 const StaticMap = dynamic(() => import('@/components/static-map'), {
   ssr: false,
@@ -97,12 +101,36 @@ const towRideOptions: RideOption[] = [
 
 const aiSuggestions = ["Work in Downtown", "Airport Transfer", "Mall of the Emirates", "Beach Gathering"];
 
+/** A real, partner-paid promotion for the Skip vertical (see
+ * src/lib/ads.ts) - shown as a compact banner rather than a full ride
+ * card since Skip's sheet is already dense. Disappears on its own once
+ * the ad's paid duration runs out. */
+const SkipAdBanner = ({ ad }: { ad: Ad }) => (
+    <Link href={ad.linkPath} className="block">
+        <div className="flex items-center gap-3 p-3 rounded-2xl border border-amber-400/20 bg-amber-500/5 hover:bg-amber-500/10 transition-colors">
+            <div className="p-2 bg-amber-400 rounded-xl text-black shrink-0">
+                <Zap className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-500">Promoted</span>
+                    <AdTierBadge tier={ad.tier} />
+                </div>
+                <p className="font-bold text-sm truncate">{ad.title}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{ad.description}</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+        </div>
+    </Link>
+);
+
 const InitialStep = ({
   activeTab, onTabChange, onFindRide, onOpenAiPlanner, currency,
-  pickup, destination, onPickupChange, onDestinationChange, onSelectSuggestion,
+  pickup, destination, onPickupChange, onDestinationChange, onSelectSuggestion, topAd,
 }: {
   activeTab: RideType, onTabChange: (tab: RideType) => void, onFindRide: () => void, onOpenAiPlanner: () => void, currency: any,
   pickup: string, destination: string, onPickupChange: (v: string) => void, onDestinationChange: (v: string) => void, onSelectSuggestion: (s: string) => void,
+  topAd: Ad | null,
 }) => (
     <div className="space-y-6 pb-4">
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as RideType)} className="w-full">
@@ -163,6 +191,8 @@ const InitialStep = ({
             ))}
          </div>
       </div>
+
+      {topAd && <SkipAdBanner ad={topAd} />}
     </div>
 );
 
@@ -261,6 +291,13 @@ export default function SkipPage() {
   const { toast } = useToast();
   const { currency, region } = useRegional();
   const { user } = useAuth();
+  const [interests, setInterests] = useState<string[]>([]);
+  const skipAds = useActiveAds('skip', interests);
+
+  useEffect(() => {
+    if (!user) return;
+    return subscribeToUserProfile(user.uid, (profile) => setInterests(profile?.interests ?? []));
+  }, [user]);
 
   const rideOptions = activeTab === 'personal' ? personalRideOptions : activeTab === 'courier' ? courierRideOptions : towRideOptions;
 
@@ -455,6 +492,7 @@ export default function SkipPage() {
                         onPickupChange={setPickup}
                         onDestinationChange={setDestination}
                         onSelectSuggestion={(s) => { setDestination(s); setStep('vehicles'); }}
+                        topAd={skipAds[0] ?? null}
                       />
                   ) : step === 'vehicles' ? (
                       <VehicleSelectionStep rideOptions={rideOptions} onSelectRide={handleRideSelect} onBack={() => setStep('initial')} currency={currency} />

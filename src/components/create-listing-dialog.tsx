@@ -17,8 +17,9 @@ import { generateProductDescription } from "@/app/actions";
 import { createProduct } from "@/lib/products";
 import { type UserProfile } from "@/lib/users";
 import CameraView from "@/components/camera-view";
+import { MARKETPLACE_CATEGORIES } from "@/lib/categories";
 
-const CATEGORIES = ["fashion", "beauty", "wellness", "home", "food"];
+const CATEGORIES = MARKETPLACE_CATEGORIES.map((c) => c.id);
 
 export default function CreateListingDialog({
   open,
@@ -36,7 +37,7 @@ export default function CreateListingDialog({
   const { toast } = useToast();
 
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [category, setCategory] = useState<string>(CATEGORIES[0]);
   const [price, setPrice] = useState("");
   const [features, setFeatures] = useState("");
   const [description, setDescription] = useState("");
@@ -138,7 +139,7 @@ export default function CreateListingDialog({
                 <Select value={category} onValueChange={setCategory}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</SelectItem>)}
+                    {MARKETPLACE_CATEGORIES.map((c) => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

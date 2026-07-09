@@ -16,6 +16,7 @@ import { subscribeToUserProfile, type UserProfile } from "@/lib/users";
 import { Skeleton } from "@/components/ui/skeleton";
 import NotificationBell from "@/components/notification-bell";
 import GlobalSearchDialog from "@/components/global-search-dialog";
+import InterestPickerDialog from "@/components/interest-picker-dialog";
 
 const VibesMap = dynamic(() => import("@/components/vibes-map"), {
   ssr: false,
@@ -51,11 +52,20 @@ export default function VibeHubPage() {
   const [vibeView, setVibeView] = useState("feed");
   const [isVibeCreatorOpen, setIsVibeCreatorOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isInterestsOpen, setIsInterestsOpen] = useState(false);
 
   useEffect(() => {
     if (!user) return;
     return subscribeToUserProfile(user.uid, setProfile);
   }, [user]);
+
+  // First-run onboarding: prompt for interests once a profile has loaded
+  // and genuinely has none yet (not on every load - only while empty).
+  useEffect(() => {
+    if (profile && (!profile.interests || profile.interests.length === 0)) {
+      setIsInterestsOpen(true);
+    }
+  }, [profile]);
 
   return (
     <>
@@ -136,7 +146,7 @@ export default function VibeHubPage() {
               {vibeView === 'feed' ? (
                   <>
                       <FriendStoryCarousel onAddStory={() => setIsVibeCreatorOpen(true)} />
-                      <SuggestionCards />
+                      <SuggestionCards profile={profile} />
                       <VibeFeed profile={profile} />
                   </>
               ) : (
@@ -153,6 +163,14 @@ export default function VibeHubPage() {
       </div>
       <CreateVibeDialog open={isVibeCreatorOpen} onOpenChange={setIsVibeCreatorOpen} profile={profile} />
       <GlobalSearchDialog open={isSearchOpen} onOpenChange={setIsSearchOpen} />
+      {user && (
+        <InterestPickerDialog
+          open={isInterestsOpen}
+          onOpenChange={setIsInterestsOpen}
+          uid={user.uid}
+          initialInterests={profile?.interests ?? []}
+        />
+      )}
     </>
   );
 }

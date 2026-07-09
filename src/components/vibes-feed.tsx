@@ -33,6 +33,7 @@ import {
 } from "@/lib/vibes";
 import { sendGift, spendFunds } from "@/lib/wallet";
 import { useActiveAds, type Ad } from "@/lib/ads";
+import AdTierBadge from "@/components/ad-tier-badge";
 import { Timestamp } from "firebase/firestore";
 
 const PanoramaView = lazy(() => import('./panorama-view'));
@@ -300,7 +301,10 @@ const AdCard = ({ ad }: { ad: Ad }) => {
             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/50 pointer-events-none" />
             <div className="absolute top-6 left-6 right-6 flex items-center justify-between z-10">
                 <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/20 gap-1"><Megaphone className="w-3 h-3" /> Promoted</Badge>
-                <span className="text-[10px] text-white/50">@{ad.ownerHandle}</span>
+                <div className="flex items-center gap-2">
+                    <AdTierBadge tier={ad.tier} />
+                    <span className="text-[10px] text-white/50">@{ad.ownerHandle}</span>
+                </div>
             </div>
             <div className="absolute bottom-6 left-6 right-6 z-10 space-y-3">
                 <p className="text-2xl font-black text-white leading-tight">{ad.title}</p>
@@ -491,7 +495,7 @@ export function VibeFeed({ profile }: { profile: UserProfile | null }) {
     const [isRanking, setIsRanking] = useState(false);
     const [rankedIds, setRankedIds] = useState<string[] | null>(null);
     const { toast } = useToast();
-    const activeAds = useActiveAds();
+    const activeAds = useActiveAds('vibes', profile?.interests ?? []);
 
     useEffect(() => subscribeToVibePosts(setPosts), []);
 

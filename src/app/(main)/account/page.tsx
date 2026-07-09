@@ -67,6 +67,7 @@ import CreateStayDialog from "@/components/create-stay-dialog";
 import CreateEventDialog from "@/components/create-event-dialog";
 import DriverConsoleCard from "@/components/driver-console-card";
 import PromoteDialog from "@/components/promote-dialog";
+import InterestPickerDialog from "@/components/interest-picker-dialog";
 import { aiCareerCoach } from "@/app/actions";
 import { getIdToken } from "@/lib/get-id-token";
 
@@ -182,6 +183,7 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
     const [bio, setBio] = useState("Exploring the vibes of the city. Digital nomad and coffee enthusiast.");
     const [isEditing, setIsEditing] = useState(false);
     const [isUpgrading, setIsUpgrading] = useState(false);
+    const [isInterestsOpen, setIsInterestsOpen] = useState(false);
 
     const handleBecomePartner = async () => {
         if (!user) return;
@@ -267,6 +269,27 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
                 </CardContent>
             </Card>
 
+            <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2"><Sparkles className="w-4 h-4 text-purple-500"/> Your Interests</CardTitle>
+                    <CardDescription className="text-xs">Drives your Find Friends suggestions and which promotions you see.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {profile?.interests && profile.interests.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                            {profile.interests.map((tag) => <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>)}
+                        </div>
+                    ) : (
+                        <p className="text-xs text-muted-foreground">No interests picked yet.</p>
+                    )}
+                </CardContent>
+                <CardFooter>
+                    <Button variant="outline" className="w-full rounded-xl h-11 font-bold" onClick={() => setIsInterestsOpen(true)}>
+                        Edit Interests
+                    </Button>
+                </CardFooter>
+            </Card>
+
             {profile && profile.role !== 'partner' && (
                 <Card className="border-primary/20 bg-primary/5 backdrop-blur-xl">
                     <CardHeader className="pb-2">
@@ -279,6 +302,15 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
                         </Button>
                     </CardFooter>
                 </Card>
+            )}
+
+            {user && (
+                <InterestPickerDialog
+                    open={isInterestsOpen}
+                    onOpenChange={setIsInterestsOpen}
+                    uid={user.uid}
+                    initialInterests={profile?.interests ?? []}
+                />
             )}
         </div>
     );

@@ -21,6 +21,10 @@ import { spendFunds } from '@/lib/wallet';
 import { subscribeToProducts, type Product } from '@/lib/products';
 import CameraView from '@/components/camera-view';
 import { mockServiceItems, type MarketplaceItem } from '@/lib/catalog-data';
+import { useActiveAds } from '@/lib/ads';
+import PromotedTile from '@/components/promoted-tile';
+import { subscribeToUserProfile } from '@/lib/users';
+import { MARKETPLACE_CATEGORIES } from '@/lib/categories';
 
 function productToMarketplaceItem(product: Product): MarketplaceItem {
     return {
@@ -211,9 +215,13 @@ const CheckoutDialog = ({ open, onOpenChange, item }: { open: boolean, onOpenCha
 
 export default function ShopPage() {
   const searchParams = useSearchParams();
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string>("all");
   const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  const [interests, setInterests] = useState<string[]>([]);
+  const shopAds = useActiveAds('shop', interests);
 
   useEffect(() => {
     const q = searchParams.get('q');
@@ -222,6 +230,11 @@ export default function ShopPage() {
 
   useEffect(() => subscribeToProducts(setProducts), []);
 
+  useEffect(() => {
+    if (!user) return;
+    return subscribeToUserProfile(user.uid, (profile) => setInterests(profile?.interests ?? []));
+  }, [user]);
+
   const allItems = useMemo(
     () => [...products.map(productToMarketplaceItem), ...mockServiceItems],
     [products]
@@ -229,14 +242,15 @@ export default function ShopPage() {
 
   const filteredItems = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return allItems;
-    return allItems.filter(item =>
-        item.title.toLowerCase().includes(term) ||
-        item.description.toLowerCase().includes(term) ||
-        item.category.toLowerCase().includes(term) ||
-        item.providerName.toLowerCase().includes(term)
-    );
-  }, [allItems, searchTerm]);
+    return allItems.filter(item => {
+        if (activeCategory !== "all" && item.category.toLowerCase() !== activeCategory) return false;
+        if (!term) return true;
+        return item.title.toLowerCase().includes(term) ||
+            item.description.toLowerCase().includes(term) ||
+            item.category.toLowerCase().includes(term) ||
+            item.providerName.toLowerCase().includes(term);
+    });
+  }, [allItems, searchTerm, activeCategory]);
 
   return (
     <div className="w-full p-4 md:p-6 lg:p-8 space-y-6">
@@ -250,12 +264,41 @@ export default function ShopPage() {
             </div>
         </div>
 
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <Button
+                variant={activeCategory === "all" ? "default" : "outline"}
+                size="sm"
+                className="rounded-full shrink-0"
+                onClick={() => setActiveCategory("all")}
+            >
+                All
+            </Button>
+            {MARKETPLACE_CATEGORIES.map((c) => (
+                <Button
+                    key={c.id}
+                    variant={activeCategory === c.id ? "default" : "outline"}
+                    size="sm"
+                    className="rounded-full shrink-0"
+                    onClick={() => setActiveCategory(c.id)}
+                >
+                    {c.label}
+                </Button>
+            ))}
+        </div>
+
         {filteredItems.length === 0 ? (
-            <p className="text-center text-muted-foreground py-16">No products match "{searchTerm}".</p>
+            <p className="text-center text-muted-foreground py-16">
+                {searchTerm ? `No products match "${searchTerm}".` : "No products in this category yet."}
+            </p>
         ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                 {filteredItems.map((item, i) => (
-                    <MarketplaceItemCard key={item.productId ?? `mock-${i}`} item={item} onCall={setActiveCallTarget} />
+                    <React.Fragment key={item.productId ?? `mock-${i}`}>
+                        <MarketplaceItemCard item={item} onCall={setActiveCallTarget} />
+                        {(i + 1) % 5 === 0 && shopAds.length > 0 && (
+                            <PromotedTile ad={shopAds[Math.floor(i / 5) % shopAds.length]} />
+                        )}
+                    </React.Fragment>
                 ))}
             </div>
         )}

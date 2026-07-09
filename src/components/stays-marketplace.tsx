@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,9 @@ import { subscribeToStays, type HostedStay } from "@/lib/stays";
 import { averageRating } from "@/lib/ratings";
 import RatingStars from "@/components/rating-stars";
 import RateDialog from "@/components/rate-dialog";
+import { useActiveAds } from "@/lib/ads";
+import PromotedTile from "@/components/promoted-tile";
+import { subscribeToUserProfile } from "@/lib/users";
 
 const StaticMap = dynamic(() => import("@/components/static-map"), {
   ssr: false,
@@ -330,8 +333,16 @@ const StayCard = ({ stay, onView }: { stay: Stay; onView: (stay: Stay) => void }
 export default function StaysMarketplace({ searchTerm }: { searchTerm: string }) {
   const [viewingStay, setViewingStay] = useState<Stay | null>(null);
   const [hostedStays, setHostedStays] = useState<HostedStay[]>([]);
+  const { user } = useAuth();
+  const [interests, setInterests] = useState<string[]>([]);
+  const stayAds = useActiveAds('stays', interests);
 
   useEffect(() => subscribeToStays(setHostedStays), []);
+
+  useEffect(() => {
+    if (!user) return;
+    return subscribeToUserProfile(user.uid, (profile) => setInterests(profile?.interests ?? []));
+  }, [user]);
 
   const allStays = useMemo(
     () => [...hostedStays.map(hostedStayToDisplay), ...stays],
@@ -347,8 +358,13 @@ export default function StaysMarketplace({ searchTerm }: { searchTerm: string })
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredStays.map(stay => (
-          <StayCard key={stay.id} stay={stay} onView={setViewingStay} />
+        {filteredStays.map((stay, i) => (
+          <React.Fragment key={stay.id}>
+            <StayCard stay={stay} onView={setViewingStay} />
+            {(i + 1) % 6 === 0 && stayAds.length > 0 && (
+              <PromotedTile ad={stayAds[Math.floor(i / 6) % stayAds.length]} />
+            )}
+          </React.Fragment>
         ))}
       </div>
 

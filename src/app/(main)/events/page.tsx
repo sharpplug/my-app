@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar, MapPin, MicVocal, Search, Ticket, Loader2, Link2, Home } from "lucide-react";
 import Image from "next/image";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/auth-provider";
@@ -23,6 +23,9 @@ import { subscribeToEvents, type HostedEvent } from "@/lib/events";
 import { averageRating } from "@/lib/ratings";
 import RatingStars from "@/components/rating-stars";
 import RateDialog from "@/components/rate-dialog";
+import { useActiveAds } from "@/lib/ads";
+import PromotedTile from "@/components/promoted-tile";
+import { subscribeToUserProfile } from "@/lib/users";
 
 const StaticMap = dynamic(() => import("@/components/static-map"), {
   ssr: false,
@@ -194,8 +197,16 @@ export default function LinksPage() {
     const [bookingEvent, setBookingEvent] = useState<MoodEvent | null>(null);
     const [activeTab, setActiveTab] = useState<"events" | "stays">(searchParams.get('tab') === 'stays' ? 'stays' : 'events');
     const [hostedEvents, setHostedEvents] = useState<HostedEvent[]>([]);
+    const { user } = useAuth();
+    const [interests, setInterests] = useState<string[]>([]);
+    const eventAds = useActiveAds('events', interests);
 
     useEffect(() => subscribeToEvents(setHostedEvents), []);
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToUserProfile(user.uid, (profile) => setInterests(profile?.interests ?? []));
+    }, [user]);
 
     useEffect(() => {
         setSearchTerm(querySearch);
@@ -238,8 +249,13 @@ export default function LinksPage() {
 
                 <TabsContent value="events" className="mt-0">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {filteredEvents.map(event => (
-                            <EventCard key={event.id} event={event} onBook={setBookingEvent} />
+                        {filteredEvents.map((event, i) => (
+                            <React.Fragment key={event.id}>
+                                <EventCard event={event} onBook={setBookingEvent} />
+                                {(i + 1) % 6 === 0 && eventAds.length > 0 && (
+                                    <PromotedTile ad={eventAds[Math.floor(i / 6) % eventAds.length]} aspect="video" />
+                                )}
+                            </React.Fragment>
                         ))}
                     </div>
 

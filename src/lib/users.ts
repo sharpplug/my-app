@@ -23,6 +23,10 @@ export type UserProfile = {
   displayName: string;
   photoURL: string | null;
   role: UserRole;
+  /** Chosen once during onboarding (src/components/interest-picker-dialog.tsx),
+   * editable later in Account settings. Drives Find Friends discovery
+   * (src/lib/social.ts) and interest-matched ad ranking (src/lib/ads.ts). */
+  interests?: string[];
 };
 
 const usersRef = (uid: string) => doc(firestore, "users", uid);
@@ -101,6 +105,10 @@ export function subscribeToUserProfile(uid: string, onChange: (profile: UserProf
  */
 export async function becomePartner(uid: string): Promise<void> {
   await updateDoc(usersRef(uid), { role: "partner" });
+}
+
+export async function updateInterests(uid: string, interests: string[]): Promise<void> {
+  await updateDoc(usersRef(uid), { interests });
 }
 
 export async function findUserByHandle(rawHandle: string): Promise<UserProfile | null> {
