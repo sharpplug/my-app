@@ -26,7 +26,7 @@ const AMENITY_ICONS: Record<string, React.ElementType> = {
   Wifi, Kitchen: Utensils, Pool: Waves, Parking: Car, AC: Wind,
 };
 
-const stays = [
+export const stays = [
   {
     id: 1,
     title: "Oceanfront Villa in Jumeirah",

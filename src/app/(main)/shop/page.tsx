@@ -20,22 +20,7 @@ import { useAuth } from '@/contexts/auth-provider';
 import { spendFunds } from '@/lib/wallet';
 import { subscribeToProducts, type Product } from '@/lib/products';
 import CameraView from '@/components/camera-view';
-
-type MarketplaceItem = {
-    category: string;
-    title: string;
-    description: string;
-    image: string;
-    hint: string;
-    providerName: string;
-    type: 'on-site' | 'virtual' | 'product';
-    price: number;
-    tryOn?: boolean;
-    /** Set only for real, partner-listed items (src/lib/products.ts) - drives
-     * seller-crediting in spendFunds and the "can't buy your own listing" guard. */
-    productId?: string;
-    ownerUid?: string;
-};
+import { mockServiceItems, type MarketplaceItem } from '@/lib/catalog-data';
 
 function productToMarketplaceItem(product: Product): MarketplaceItem {
     return {
@@ -52,17 +37,6 @@ function productToMarketplaceItem(product: Product): MarketplaceItem {
         ownerUid: product.ownerUid,
     };
 }
-
-const mockServiceItems: MarketplaceItem[] = [
-    { category: 'wellness', title: "Relaxing Massage", description: "60-min session", image: "https://picsum.photos/seed/massage/400/400", hint: "spa massage", providerName: "Serenity Spa", type: 'on-site', price: 250 },
-    { category: 'wellness', title: "Dermatology Consultation", description: "Acne & Skin concerns", image: "https://picsum.photos/seed/derm/400/400", hint: "dermatologist online", providerName: "Skin & Glow Clinic", type: 'virtual', price: 300 },
-    { category: 'fashion', title: "Silk Wrap Dress", description: "Aisha's Boutique", image: "https://picsum.photos/seed/dress/400/400", hint: "silk dress", providerName: "Aisha's Boutique", type: 'product', price: 450, tryOn: true },
-    { category: 'fashion', title: "Aviator Sunglasses", description: "UV400, polarized", image: "https://picsum.photos/seed/sunglasses/400/400", hint: "sunglasses", providerName: "Desert Optics", type: 'product', price: 120, tryOn: true },
-    { category: 'beauty', title: "Matte Lipstick - Rosewood", description: "Long-lasting, vegan", image: "https://picsum.photos/seed/lipstick/400/400", hint: "lipstick", providerName: "Glow Cosmetics", type: 'product', price: 85, tryOn: true },
-    { category: 'home', title: "Handwoven Rug", description: "Artisan's Corner", image: "https://picsum.photos/seed/rug/400/400", hint: "handwoven rug", providerName: "Artisan's Corner", type: 'product', price: 620 },
-    { category: 'food', title: "Weekly Organic Box", description: "Farm-fresh produce", image: "https://picsum.photos/seed/veggies/400/400", hint: "organic vegetables", providerName: "Green Souk", type: 'product', price: 95 },
-    { category: 'wellness', title: "Personal Trainer Session", description: "1-on-1, 45 min", image: "https://picsum.photos/seed/trainer/400/400", hint: "gym trainer", providerName: "Flow Fitness", type: 'on-site', price: 180 },
-];
 
 const TryOnDialog = ({ open, onOpenChange, item }: { open: boolean; onOpenChange: (open: boolean) => void; item: MarketplaceItem | null }) => {
     const [userPhoto, setUserPhoto] = useState<string | null>(null);

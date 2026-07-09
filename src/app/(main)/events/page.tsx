@@ -17,107 +17,12 @@ import { spendFunds } from "@/lib/wallet";
 import dynamic from "next/dynamic";
 import { Skeleton } from "@/components/ui/skeleton";
 import StaysMarketplace from "@/components/stays-marketplace";
+import { mockEvents, type MoodEvent } from "@/lib/catalog-data";
 
 const StaticMap = dynamic(() => import("@/components/static-map"), {
   ssr: false,
   loading: () => <Skeleton className="w-full h-full bg-muted" />,
 });
-
-const mockEvents = [
-  {
-    id: 1,
-    title: "Artisan Market by the Sea",
-    date: "Sat, Aug 24, 4:00 PM",
-    location: "Jumeirah Beach Park",
-    price: "Free Entry",
-    priceValue: 0,
-    category: "Market",
-    badge: "Families",
-    image: "https://picsum.photos/id/1015/600/400",
-    hint: "outdoor market",
-    lat: 25.2058, lng: 55.2483,
-  },
-  {
-    id: 2,
-    title: "Ladies Night Yoga Flow",
-    date: "Tue, Aug 27, 7:00 PM",
-    location: "Serenity Yoga Studio",
-    price: "Dhs. 75",
-    priceValue: 75,
-    category: "Wellness",
-    badge: "Ladies Only",
-    image: "https://picsum.photos/id/1016/600/400",
-    hint: "yoga class",
-    lat: 25.0805, lng: 55.1403,
-  },
-  {
-    id: 3,
-    title: "Live Oud Performance",
-    date: "Fri, Aug 30, 9:00 PM",
-    location: "The Music Hall",
-    price: "Dhs. 150",
-    priceValue: 150,
-    category: "Music",
-    badge: "Mixed",
-    image: "https://picsum.photos/id/1018/600/400",
-    hint: "live music",
-    lat: 25.1959, lng: 55.2755,
-  },
-  {
-    id: 4,
-    title: "Family Movie Night Under the Stars",
-    date: "Sat, Sep 7, 6:30 PM",
-    location: "Zabeel Park",
-    price: "Dhs. 50",
-    priceValue: 50,
-    category: "Film",
-    badge: "Families",
-    image: "https://picsum.photos/id/1019/600/400",
-    hint: "outdoor cinema",
-    lat: 25.2285, lng: 55.3079,
-  },
-  {
-    id: 5,
-    title: "Desert Adventure Photography Trip",
-    date: "Sun, Sep 8, 5:00 AM",
-    location: "Al Qudra Desert",
-    price: "Dhs. 350",
-    priceValue: 350,
-    category: "Adventure",
-    badge: "Photography",
-    image: "https://picsum.photos/seed/deserttrip/600/400",
-    hint: "desert sunrise",
-    lat: 24.8834, lng: 55.4033,
-  },
-  {
-    id: 6,
-    title: "Modern Art Expo",
-    date: "Wed, Sep 11, 10:00 AM",
-    location: "Dubai World Trade Centre",
-    price: "Dhs. 100",
-    priceValue: 100,
-    category: "Art",
-    badge: "Expo",
-    image: "https://picsum.photos/seed/artexpo/600/400",
-    hint: "art gallery",
-    lat: 25.2251, lng: 55.2887,
-  },
-  {
-    id: 7,
-    title: "HydraFacial",
-    date: "Daily",
-    location: "Skin & Glow Clinic",
-    price: "Dhs. 600",
-    priceValue: 600,
-    category: "Wellness",
-    badge: "Beauty",
-    image: "https://picsum.photos/seed/hydrafacial/600/400",
-    hint: "hydrafacial treatment",
-    lat: 25.2138, lng: 55.2820,
-  },
-];
-
-type MoodEvent = (typeof mockEvents)[0];
 
 const BookingDialog = ({ event, open, onOpenChange }: { event: MoodEvent | null; open: boolean; onOpenChange: (open: boolean) => void }) => {
   const { toast } = useToast();
@@ -228,11 +133,12 @@ export default function LinksPage() {
     const querySearch = searchParams.get('q') || "";
     const [searchTerm, setSearchTerm] = useState(querySearch);
     const [bookingEvent, setBookingEvent] = useState<MoodEvent | null>(null);
-    const [activeTab, setActiveTab] = useState<"events" | "stays">("events");
+    const [activeTab, setActiveTab] = useState<"events" | "stays">(searchParams.get('tab') === 'stays' ? 'stays' : 'events');
 
     useEffect(() => {
         setSearchTerm(querySearch);
-    }, [querySearch]);
+        if (searchParams.get('tab') === 'stays') setActiveTab('stays');
+    }, [querySearch, searchParams]);
 
     const filteredEvents = useMemo(() => mockEvents.filter(event =>
         event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||

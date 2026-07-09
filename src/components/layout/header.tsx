@@ -1,10 +1,12 @@
 
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { MessageSquare, Camera } from "lucide-react";
+import { MessageSquare, Camera, Search } from "lucide-react";
 import { Button } from "../ui/button";
 import NotificationBell from "../notification-bell";
+import GlobalSearchDialog from "../global-search-dialog";
 
 const Logo = (props: React.SVGProps<SVGSVGElement>) => (
     <svg
@@ -29,6 +31,7 @@ const Logo = (props: React.SVGProps<SVGSVGElement>) => (
 );
 
 export default function Header() {
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   return (
     <header className="absolute top-0 left-0 right-0 z-20 flex h-16 items-center justify-between border-b bg-background/80 px-4 backdrop-blur-sm sm:px-6">
        <Link href="/vibes" className="flex items-center gap-2">
@@ -39,7 +42,13 @@ export default function Header() {
                </span>
            </h1>
         </Link>
-        <NotificationBell />
+        <div className="flex items-center">
+            <Button variant="ghost" size="icon" onClick={() => setIsSearchOpen(true)} aria-label="Search">
+              <Search className="w-5 h-5" />
+            </Button>
+            <NotificationBell />
+        </div>
+        <GlobalSearchDialog open={isSearchOpen} onOpenChange={setIsSearchOpen} />
     </header>
   );
 }

@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Waves, Sparkles, Map, List, Camera, MessageSquare } from "lucide-react";
+import { Waves, Sparkles, Map, List, Camera, MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { VibeFeed, CreateVibeDialog } from "@/components/vibes-feed";
 import { FriendStoryCarousel, SuggestionCards } from "@/components/friends-carousel";
@@ -15,6 +15,7 @@ import { useAuth } from "@/contexts/auth-provider";
 import { subscribeToUserProfile, type UserProfile } from "@/lib/users";
 import { Skeleton } from "@/components/ui/skeleton";
 import NotificationBell from "@/components/notification-bell";
+import GlobalSearchDialog from "@/components/global-search-dialog";
 
 const VibesMap = dynamic(() => import("@/components/vibes-map"), {
   ssr: false,
@@ -49,6 +50,7 @@ export default function VibeHubPage() {
   const [activeTab, setActiveTab] = useState("vibes");
   const [vibeView, setVibeView] = useState("feed");
   const [isVibeCreatorOpen, setIsVibeCreatorOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -87,6 +89,9 @@ export default function VibeHubPage() {
                    </h1>
                 </Link>
                <div className="flex items-center">
+                    <Button variant="ghost" size="icon" className="text-white h-9 w-9 flex-shrink-0 hover:bg-white/10 hover:text-white" onClick={() => setIsSearchOpen(true)} aria-label="Search">
+                        <Search className="w-5 h-5" />
+                    </Button>
                     <NotificationBell className="text-white hover:bg-white/10 hover:text-white" />
                     <Link href="/messages" passHref>
                         <Button variant="ghost" size="icon" className="text-white h-9 w-9 flex-shrink-0 hover:bg-white/10 hover:text-white">
@@ -147,6 +152,7 @@ export default function VibeHubPage() {
         </div>
       </div>
       <CreateVibeDialog open={isVibeCreatorOpen} onOpenChange={setIsVibeCreatorOpen} profile={profile} />
+      <GlobalSearchDialog open={isSearchOpen} onOpenChange={setIsSearchOpen} />
     </>
   );
 }
