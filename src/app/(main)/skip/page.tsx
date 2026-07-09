@@ -298,7 +298,7 @@ export default function SkipPage() {
           setItinerary(null);
           setCalendarPlan(null);
           setStep('searching');
-          setTimeout(() => setStep('confirmed'), 2500);
+          setTimeout(() => setStep('confirmed'), 1000);
       } catch (err) {
           toast({ variant: 'destructive', title: "Payment Failed", description: err instanceof Error ? err.message : "Please try again." });
       } finally {
@@ -333,7 +333,7 @@ export default function SkipPage() {
               await spendFunds(user.uid, `${selectedRide.name} ride`, selectedRide.price);
           }
           setStep('searching');
-          setTimeout(() => setStep('confirmed'), 2500);
+          setTimeout(() => setStep('confirmed'), 1000);
       } catch (err) {
           toast({ variant: 'destructive', title: "Payment Failed", description: err instanceof Error ? err.message : "Please try again." });
       } finally {

@@ -107,19 +107,21 @@ export async function getAuraAnalysis(
   const uid = await requireAuth(idToken);
   await enforceRateLimit(uid, "getAuraAnalysis", TIGHT);
   try {
-    const moodResult = await analyzeUserMood({
-      photoDataUri: input.photoDataUri,
-      textDescription: input.textDescription,
-    });
-
-    let skinResult: AnalyzeSkinConditionOutput | null = null;
-    if (input.photoDataUri) {
-       try {
-        skinResult = await analyzeSkinCondition({ photoDataUri: input.photoDataUri, description: input.description });
-       } catch (err) {
-          // Gracefully fail, skinResult is already null
-       }
-    }
+    // Mood and skin analysis are independent Gemini calls on the same
+    // photo - they used to run one after the other, roughly doubling the
+    // wait for a photo-based Aura analysis. Running them concurrently
+    // keeps this to the slower of the two calls instead of their sum.
+    const [moodResult, skinResult] = await Promise.all([
+      analyzeUserMood({
+        photoDataUri: input.photoDataUri,
+        textDescription: input.textDescription,
+      }),
+      input.photoDataUri
+        ? analyzeSkinCondition({ photoDataUri: input.photoDataUri, description: input.description }).catch(
+            (): AnalyzeSkinConditionOutput | null => null
+          )
+        : Promise.resolve(null),
+    ]);
 
     return { mood: moodResult, skin: skinResult };
   } catch (error) {

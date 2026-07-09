@@ -231,7 +231,7 @@ export default function WalletTab() {
                 // after the user "approves" it, so the flow can be demoed
                 // end-to-end. Swap for a real redirect/poll once a live
                 // provider is wired to topUpWebhook.
-                await new Promise((resolve) => setTimeout(resolve, 2200));
+                await new Promise((resolve) => setTimeout(resolve, 700));
                 await simulateTopUpConfirmation(intentId);
 
                 setIsTopUpOpen(false);
@@ -273,7 +273,7 @@ export default function WalletTab() {
 
                 // Demo stand-in - see the matching comment on handleTopUp and
                 // functions/src/index.ts's simulateWithdrawalConfirmation.
-                await new Promise((resolve) => setTimeout(resolve, 2200));
+                await new Promise((resolve) => setTimeout(resolve, 700));
                 await simulateWithdrawalConfirmation(intentId);
 
                 setIsWithdrawOpen(false);

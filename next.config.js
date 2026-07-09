@@ -34,6 +34,13 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Import only the icons/chart pieces actually used instead of each
+  // package's full barrel file - smaller client bundles and a faster dev
+  // refresh, since Next doesn't have to trace through the whole package on
+  // every change to a file that imports from it.
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'date-fns', 'recharts'],
+  },
   images: {
     remotePatterns: [
       {
