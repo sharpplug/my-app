@@ -4,13 +4,13 @@ import React, { useState, useTransition, useEffect, useRef, useMemo, lazy, Suspe
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Camera, Image as ImageIcon, Sparkles, Heart, Send, BrainCircuit, Gift, Waves, MapPin, Users, Phone, X, Music, Trash2, Loader2 } from "lucide-react";
+import { Camera, Image as ImageIcon, Sparkles, Heart, Send, BrainCircuit, Gift, Waves, MapPin, Users, Phone, X, Music, Trash2, Loader2, BookOpen } from "lucide-react";
 import Image from 'next/image';
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { generateVibeVideoAction, analyzeVibePost, AnalyzeVibePostOutput } from "@/app/actions";
+import { generateVibeVideoAction, generateStoryAction, analyzeVibePost, AnalyzeVibePostOutput, recommendVibes } from "@/app/actions";
 import { getIdToken } from "@/lib/get-id-token";
 import CameraView from "./camera-view";
 import { Badge } from "./ui/badge";
@@ -332,6 +332,7 @@ export const CreateVibeDialog = ({ open, onOpenChange, profile }: { open: boolea
     const [selectedMusic, setSelectedMusic] = useState<typeof sampleMusic[0] | null>(null);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [isVibifying, setIsVibifying] = useState(false);
+    const [isStorifying, setIsStorifying] = useState(false);
     const [isPosting, setIsPosting] = useState(false);
     const { toast } = useToast();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -347,6 +348,19 @@ export const CreateVibeDialog = ({ open, onOpenChange, profile }: { open: boolea
             toast({ title: "✨ Vibified!", description: "AI video generated successfully." });
         } catch (e) { toast({ variant: "destructive", title: "Vibify Offline", description: e instanceof Error ? e.message : undefined }); }
         finally { setIsVibifying(false); }
+    };
+
+    const handleStorify = async () => {
+        if (!text.trim()) { toast({ variant: "destructive", title: "Add a prompt first!" }); return; }
+        setIsStorifying(true);
+        try {
+            const idToken = await getIdToken();
+            const res = await generateStoryAction(idToken, { prompt: text });
+            setText(res.storyText);
+            setMedia(prev => [...prev, { uri: res.imageDataUri, type: 'photo' }]);
+            toast({ title: "✨ Story generated!", description: "Your prompt became a short story with cover art." });
+        } catch (e) { toast({ variant: "destructive", title: "Story Generation Failed", description: e instanceof Error ? e.message : undefined }); }
+        finally { setIsStorifying(false); }
     };
 
     const reset = () => {
@@ -416,6 +430,9 @@ export const CreateVibeDialog = ({ open, onOpenChange, profile }: { open: boolea
                                     r.readAsDataURL(f);
                                 });
                             }} />
+                            <Button variant="secondary" className="h-12 rounded-full bg-indigo-600 hover:bg-indigo-500 font-bold px-5" onClick={handleStorify} disabled={isStorifying}>
+                                {isStorifying ? <Loader2 className="animate-spin mr-2"/> : <BookOpen className="w-4 h-4 mr-2"/>} AI Story
+                            </Button>
                             <Button variant="secondary" className="ml-auto h-12 rounded-full bg-purple-600 hover:bg-purple-500 font-bold px-6" onClick={handleVibify} disabled={isVibifying}>
                                 {isVibifying ? <Loader2 className="animate-spin mr-2"/> : <Sparkles className="w-4 h-4 mr-2"/>} Vibify
                             </Button>
@@ -438,6 +455,9 @@ export function VibeFeed({ profile }: { profile: UserProfile | null }) {
     const [posts, setPosts] = useState<VibePost[] | null>(null);
     const [viewingPost, setViewingPost] = useState<VibePost | null>(null);
     const [activeCall, setActiveCall] = useState<CallTarget | null>(null);
+    const [isForYou, setIsForYou] = useState(false);
+    const [isRanking, setIsRanking] = useState(false);
+    const [rankedIds, setRankedIds] = useState<string[] | null>(null);
     const { toast } = useToast();
 
     useEffect(() => subscribeToVibePosts(setPosts), []);
@@ -449,6 +469,40 @@ export function VibeFeed({ profile }: { profile: UserProfile | null }) {
             toast({ variant: 'destructive', title: "Couldn't delete", description: "Please try again." });
         }
     };
+
+    const handleToggleForYou = async (checked: boolean) => {
+        setIsForYou(checked);
+        if (!checked || !posts || posts.length === 0) {
+            setRankedIds(null);
+            return;
+        }
+        setIsRanking(true);
+        try {
+            const likedTexts = posts.filter(p => profile && p.likedBy.includes(profile.uid) && p.text).map(p => p.text);
+            const userPreferences = likedTexts.length > 0
+                ? `Likes posts about: ${likedTexts.slice(0, 5).join("; ")}`
+                : "No strong preferences yet - show a balanced, engaging mix.";
+            const idToken = await getIdToken();
+            const result = await recommendVibes(idToken, {
+                userPreferences,
+                availableVibes: posts.map(p => ({ id: p.id, text: p.text, hint: p.type })),
+            });
+            setRankedIds(result.recommendedVibeIds as string[]);
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Couldn't personalize feed", description: err instanceof Error ? err.message : "Please try again." });
+            setIsForYou(false);
+        } finally {
+            setIsRanking(false);
+        }
+    };
+
+    const displayedPosts = useMemo(() => {
+        if (!posts || !isForYou || !rankedIds) return posts;
+        const byId = new Map(posts.map(p => [p.id, p]));
+        const ranked = rankedIds.map(id => byId.get(id)).filter((p): p is VibePost => !!p);
+        const remaining = posts.filter(p => !rankedIds.includes(p.id));
+        return [...ranked, ...remaining];
+    }, [posts, isForYou, rankedIds]);
 
     if (posts === null) {
         return (
@@ -469,12 +523,28 @@ export function VibeFeed({ profile }: { profile: UserProfile | null }) {
     }
 
     return (
-        <div className="w-full max-w-lg mx-auto py-6 space-y-10 px-4">
-            {posts.map(p => (
-                <div key={p.id} className="h-[85vh] min-h-[600px] w-full">
-                    <PostCard post={p} myUid={profile?.uid} onDelete={handleDelete} onOpen={setViewingPost} onCall={setActiveCall} />
-                </div>
-            ))}
+        <div className="w-full max-w-lg mx-auto py-6 space-y-6 px-4">
+            <div className="flex items-center justify-center gap-2">
+                <button
+                    type="button"
+                    onClick={() => handleToggleForYou(!isForYou)}
+                    disabled={isRanking}
+                    className={cn(
+                        "flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold border transition-colors",
+                        isForYou ? "bg-purple-600 border-purple-500 text-white" : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+                    )}
+                >
+                    {isRanking ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    {isForYou ? "For You" : "Recent"}
+                </button>
+            </div>
+            <div className="space-y-10">
+                {(displayedPosts ?? posts).map(p => (
+                    <div key={p.id} className="h-[85vh] min-h-[600px] w-full">
+                        <PostCard post={p} myUid={profile?.uid} onDelete={handleDelete} onOpen={setViewingPost} onCall={setActiveCall} />
+                    </div>
+                ))}
+            </div>
             <LiveStreamViewer post={viewingPost?.type === 'live' ? viewingPost : null} open={viewingPost?.type === 'live'} onOpenChange={(o) => !o && setViewingPost(null)} myProfile={profile} />
             <AppCall open={!!activeCall} onOpenChange={(o) => !o && setActiveCall(null)} target={activeCall} />
         </div>

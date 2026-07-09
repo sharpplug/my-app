@@ -34,6 +34,8 @@ import {
     Plus,
     MapPin,
     Trash2,
+    Sparkles,
+    Loader2,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -57,6 +59,8 @@ import { subscribeToUserProfile, becomePartner, type UserProfile } from "@/lib/u
 import { subscribeToTransactions, type WalletTransaction } from "@/lib/wallet";
 import { subscribeToMyProducts, deleteProduct, type Product as ProductType } from "@/lib/products";
 import CreateListingDialog from "@/components/create-listing-dialog";
+import { aiCareerCoach } from "@/app/actions";
+import { getIdToken } from "@/lib/get-id-token";
 
 const SettingsTab = () => {
     const { region, setRegion, language, setLanguage, dataSaver, setDataSaver } = useRegional();
@@ -397,6 +401,58 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
     );
 };
 
+const AiCareerCoachCard = () => {
+    const [skills, setSkills] = useState("");
+    const [marketDemand, setMarketDemand] = useState("");
+    const [advice, setAdvice] = useState<string | null>(null);
+    const [isPending, setIsPending] = useState(false);
+    const { toast } = useToast();
+
+    const handleAsk = async () => {
+        if (!skills.trim() || !marketDemand.trim()) {
+            toast({ variant: 'destructive', title: "Tell Naya a bit more", description: "Fill in both your skills and what your market needs." });
+            return;
+        }
+        setIsPending(true);
+        try {
+            const idToken = await getIdToken();
+            const result = await aiCareerCoach(idToken, { skills, marketDemand });
+            setAdvice(result.advice);
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Couldn't reach the coach", description: err instanceof Error ? err.message : "Please try again." });
+        } finally {
+            setIsPending(false);
+        }
+    };
+
+    return (
+        <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
+            <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-bold flex items-center gap-2"><Sparkles className="w-4 h-4 text-primary"/> AI Career Coach</CardTitle>
+                <CardDescription className="text-xs">Naya's personalized advice on growing your business in the Global South.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+                <div className="space-y-1.5">
+                    <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Your Skills</Label>
+                    <Textarea value={skills} onChange={(e) => setSkills(e.target.value)} placeholder="e.g. Tailoring, social media marketing, basic bookkeeping" className="min-h-[60px] text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                    <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Market Demand</Label>
+                    <Textarea value={marketDemand} onChange={(e) => setMarketDemand(e.target.value)} placeholder="e.g. Growing demand for custom clothing among young professionals" className="min-h-[60px] text-sm" />
+                </div>
+                {advice && (
+                    <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 text-sm leading-relaxed whitespace-pre-line">{advice}</div>
+                )}
+            </CardContent>
+            <CardFooter>
+                <Button className="w-full rounded-xl h-11 font-bold gap-2" onClick={handleAsk} disabled={isPending}>
+                    {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Get Advice
+                </Button>
+            </CardFooter>
+        </Card>
+    );
+};
+
 const AcademyTab = () => {
     return (
         <div className="space-y-6">
@@ -420,6 +476,8 @@ const AcademyTab = () => {
                     </div>
                 </CardContent>
             </Card>
+
+            <AiCareerCoachCard />
 
             <div className="space-y-4">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">My Enrollment</h3>
