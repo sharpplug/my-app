@@ -38,6 +38,7 @@ import {
     Loader2,
     Calendar,
     Megaphone,
+    Share2,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -68,6 +69,10 @@ import CreateEventDialog from "@/components/create-event-dialog";
 import DriverConsoleCard from "@/components/driver-console-card";
 import PromoteDialog from "@/components/promote-dialog";
 import InterestPickerDialog from "@/components/interest-picker-dialog";
+import ShareAppDialog from "@/components/share-app-dialog";
+import { subscribeToMyVibePosts, type VibePost } from "@/lib/vibes";
+import { subscribeToFollowing } from "@/lib/social";
+import { downloadMedia, shareMedia } from "@/lib/media-share";
 import { aiCareerCoach } from "@/app/actions";
 import { getIdToken } from "@/lib/get-id-token";
 
@@ -184,6 +189,27 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
     const [isEditing, setIsEditing] = useState(false);
     const [isUpgrading, setIsUpgrading] = useState(false);
     const [isInterestsOpen, setIsInterestsOpen] = useState(false);
+    const [isShareOpen, setIsShareOpen] = useState(false);
+    const [myPosts, setMyPosts] = useState<VibePost[]>([]);
+    const [followingUids, setFollowingUids] = useState<string[]>([]);
+    const [now, setNow] = useState(() => Date.now());
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToMyVibePosts(user.uid, setMyPosts);
+    }, [user]);
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToFollowing(user.uid, setFollowingUids);
+    }, [user]);
+
+    useEffect(() => {
+        const interval = setInterval(() => setNow(Date.now()), 60_000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const totalWaves = myPosts.reduce((sum, p) => sum + (p.waves || 0), 0);
 
     const handleBecomePartner = async () => {
         if (!user) return;
@@ -213,22 +239,27 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
                             {profile?.handle && <p className="text-sm text-primary font-medium">@{profile.handle}</p>}
                             <p className="text-sm text-muted-foreground flex items-center justify-center sm:justify-start gap-1"><Mail className="w-3 h-3"/> {user?.email}</p>
                         </div>
-                        <Button variant="outline" size="sm" className="rounded-full gap-2 px-4" onClick={() => setIsEditing(!isEditing)}>
-                            <Pencil className="w-3 h-3" /> {isEditing ? 'Save' : 'Edit Profile'}
-                        </Button>
+                        <div className="flex gap-2">
+                            <Button variant="outline" size="sm" className="rounded-full gap-2 px-4" onClick={() => setIsShareOpen(true)}>
+                                <Share2 className="w-3 h-3" /> Share
+                            </Button>
+                            <Button variant="outline" size="sm" className="rounded-full gap-2 px-4" onClick={() => setIsEditing(!isEditing)}>
+                                <Pencil className="w-3 h-3" /> {isEditing ? 'Save' : 'Edit Profile'}
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-4 py-6 border-y border-white/5 mb-6">
                         <div className="text-center group cursor-pointer">
-                            <p className="text-xl font-bold group-hover:text-primary transition-colors">24</p>
+                            <p className="text-xl font-bold group-hover:text-primary transition-colors">{myPosts.length}</p>
                             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Vibes</p>
                         </div>
                         <div className="text-center group cursor-pointer">
-                            <p className="text-xl font-bold group-hover:text-primary transition-colors">1.2k</p>
-                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Connections</p>
+                            <p className="text-xl font-bold group-hover:text-primary transition-colors">{followingUids.length}</p>
+                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Following</p>
                         </div>
                         <div className="text-center group cursor-pointer">
-                            <p className="text-xl font-bold group-hover:text-primary transition-colors">850</p>
+                            <p className="text-xl font-bold group-hover:text-primary transition-colors">{totalWaves}</p>
                             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Waves</p>
                         </div>
                     </div>
@@ -253,6 +284,63 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
                         <LogOut className="w-4 h-4"/> Sign Out
                     </Button>
                 </CardFooter>
+            </Card>
+
+            <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2"><Clock className="w-4 h-4 text-purple-400"/> Your Archive</CardTitle>
+                    <CardDescription className="text-xs">
+                        Every Vibe and Story you've posted, even after it disappears from the public feed/Story bar (Stories expire after 24h, Vibes after 48h) - only you can see it here.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {myPosts.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">Nothing posted yet.</p>
+                    ) : (
+                        <div className="grid grid-cols-3 gap-2">
+                            {myPosts.slice(0, 12).map((post) => {
+                                const isExpired = (post.expiresAt?.toMillis() ?? 0) <= now;
+                                return (
+                                    <div key={post.id} className="relative aspect-square rounded-xl overflow-hidden bg-muted border border-white/5">
+                                        {post.media?.[0] ? (
+                                            post.mediaTypes[0] === 'video' ? (
+                                                <video src={post.media[0]} className="w-full h-full object-cover" muted />
+                                            ) : (
+                                                <Image src={post.media[0]} alt={post.text || "Vibe"} fill className="object-cover" />
+                                            )
+                                        ) : (
+                                            <div className="absolute inset-0 bg-gradient-to-br from-purple-700 to-indigo-900 flex items-center justify-center p-2">
+                                                <p className="text-[10px] text-white/90 line-clamp-4">{post.text}</p>
+                                            </div>
+                                        )}
+                                        <div className={cn("absolute inset-0 flex flex-col justify-between p-1.5", isExpired && "bg-black/50")}>
+                                            <div className="flex items-center justify-between">
+                                                <Badge variant="secondary" className="text-[8px] px-1.5 py-0">{post.isStory ? "Story" : "Vibe"}</Badge>
+                                                {isExpired && <Badge variant="outline" className="text-[8px] px-1.5 py-0 bg-black/60 border-white/20 text-white">Expired</Badge>}
+                                            </div>
+                                            {post.media?.[0] && (
+                                                <div className="flex justify-end gap-1">
+                                                    <button
+                                                        className="p-1 rounded-full bg-black/50 hover:bg-black/70"
+                                                        onClick={() => post.media[0] && downloadMedia(post.media[0], `moood-${post.id}`)}
+                                                    >
+                                                        <Download className="w-3 h-3 text-white" />
+                                                    </button>
+                                                    <button
+                                                        className="p-1 rounded-full bg-black/50 hover:bg-black/70"
+                                                        onClick={() => post.media[0] && shareMedia(post.media[0], "My Moood post", post.text)}
+                                                    >
+                                                        <Share2 className="w-3 h-3 text-white" />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </CardContent>
             </Card>
 
             <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
@@ -312,6 +400,7 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
                     initialInterests={profile?.interests ?? []}
                 />
             )}
+            <ShareAppDialog open={isShareOpen} onOpenChange={setIsShareOpen} profile={profile} />
         </div>
     );
 }

@@ -51,6 +51,7 @@ export default function VibeHubPage() {
   const [activeTab, setActiveTab] = useState("vibes");
   const [vibeView, setVibeView] = useState("feed");
   const [isVibeCreatorOpen, setIsVibeCreatorOpen] = useState(false);
+  const [isStoryCreatorOpen, setIsStoryCreatorOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isInterestsOpen, setIsInterestsOpen] = useState(false);
 
@@ -145,7 +146,7 @@ export default function VibeHubPage() {
 
               {vibeView === 'feed' ? (
                   <>
-                      <FriendStoryCarousel onAddStory={() => setIsVibeCreatorOpen(true)} />
+                      <FriendStoryCarousel profile={profile} onAddStory={() => setIsStoryCreatorOpen(true)} />
                       <SuggestionCards profile={profile} />
                       <VibeFeed profile={profile} />
                   </>
@@ -162,6 +163,7 @@ export default function VibeHubPage() {
         </div>
       </div>
       <CreateVibeDialog open={isVibeCreatorOpen} onOpenChange={setIsVibeCreatorOpen} profile={profile} />
+      <CreateVibeDialog open={isStoryCreatorOpen} onOpenChange={setIsStoryCreatorOpen} profile={profile} isStory />
       <GlobalSearchDialog open={isSearchOpen} onOpenChange={setIsSearchOpen} />
       {user && (
         <InterestPickerDialog

@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { UserPlus } from "lucide-react";
 import { Carousel, CarouselContent, CarouselItem } from "@/components/ui/carousel";
@@ -10,44 +10,94 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { UserProfile } from "@/lib/users";
 import { fetchSuggestedUsers, followUser, unfollowUser, subscribeToFollowing, type SuggestedUser } from "@/lib/social";
+import { subscribeToActiveStories, type VibePost } from "@/lib/vibes";
+import StoryViewer from "@/components/story-viewer";
 
-const mockFriends = [
-  { id: 'you', name: 'Add Story', avatar: 'https://picsum.photos/id/237/40/40', isYou: true },
-  { id: 1, name: 'Khalid', avatar: 'https://picsum.photos/id/1005/40/40' },
-  { id: 2, name: 'Aisha', avatar: 'https://picsum.photos/id/1027/40/40' },
-  { id: 3, name: 'Fatima', avatar: 'https://picsum.photos/id/1011/40/40' },
-  { id: 4, name: 'Yusuf', avatar: 'https://picsum.photos/id/1012/40/40' },
-  { id: 5, name: 'Layla', avatar: 'https://picsum.photos/id/1013/40/40' },
-  { id: 6, name: 'Omar', avatar: 'https://picsum.photos/id/1014/40/40' },
-  { id: 7, name: 'Zainab', avatar: 'https://picsum.photos/id/1025/40/40' },
-];
+type AuthorGroup = { authorUid: string; authorHandle: string; authorDisplayName: string; authorPhotoURL: string | null; stories: VibePost[] };
 
-export const FriendStoryCarousel = ({ onAddStory }: { onAddStory: () => void }) => {
+/** Real Stories bar, grouped by author - previously this rendered eight
+ * hardcoded mock avatars regardless of who actually posted a Story. See
+ * src/lib/vibes.ts for the 24h Story window. */
+export const FriendStoryCarousel = ({ profile, onAddStory }: { profile: UserProfile | null; onAddStory: () => void }) => {
+  const [activeStories, setActiveStories] = useState<VibePost[]>([]);
+  const [viewingGroup, setViewingGroup] = useState<AuthorGroup | null>(null);
+
+  useEffect(() => subscribeToActiveStories(setActiveStories), []);
+
+  const groups = useMemo<AuthorGroup[]>(() => {
+    const byAuthor = new Map<string, AuthorGroup>();
+    for (const story of activeStories) {
+      const existing = byAuthor.get(story.authorUid);
+      if (existing) {
+        existing.stories.push(story);
+      } else {
+        byAuthor.set(story.authorUid, {
+          authorUid: story.authorUid,
+          authorHandle: story.authorHandle,
+          authorDisplayName: story.authorDisplayName,
+          authorPhotoURL: story.authorPhotoURL,
+          stories: [story],
+        });
+      }
+    }
+    return Array.from(byAuthor.values()).sort(
+      (a, b) => (b.stories[b.stories.length - 1].createdAt?.toMillis() ?? 0) - (a.stories[a.stories.length - 1].createdAt?.toMillis() ?? 0)
+    );
+  }, [activeStories]);
+
+  const myGroup = profile ? groups.find((g) => g.authorUid === profile.uid) : undefined;
+  const otherGroups = profile ? groups.filter((g) => g.authorUid !== profile.uid) : groups;
+
   return (
-    <div className="pl-4">
+    <>
+      <div className="pl-4">
         <Carousel opts={{ align: "start", dragFree: true }}>
-            <CarouselContent className="-ml-2">
-                {mockFriends.map((friend, index) => (
-                <CarouselItem key={index} className="basis-auto pl-2">
-                    <button onClick={friend.isYou ? onAddStory : undefined} className="flex flex-col items-center gap-1.5 w-16 text-center">
-                       <div className="relative">
-                            <Avatar className="w-14 h-14 border-2 border-purple-400 p-0.5">
-                                <AvatarImage src={friend.avatar} alt={friend.name} />
-                                <AvatarFallback>{friend.name.charAt(0)}</AvatarFallback>
-                            </Avatar>
-                            {friend.isYou && (
-                                <div className="absolute -bottom-1 -right-1 bg-white text-purple-600 rounded-full w-5 h-5 flex items-center justify-center border-2 border-black">
-                                    <UserPlus className="w-3 h-3" />
-                                </div>
-                            )}
-                       </div>
-                       <p className="text-xs text-white/80 truncate">{friend.name}</p>
-                    </button>
-                </CarouselItem>
-                ))}
-            </CarouselContent>
+          <CarouselContent className="-ml-2">
+            <CarouselItem className="basis-auto pl-2">
+              <button
+                onClick={() => (myGroup ? setViewingGroup(myGroup) : onAddStory())}
+                className="flex flex-col items-center gap-1.5 w-16 text-center"
+              >
+                <div className="relative">
+                  <Avatar className={`w-14 h-14 border-2 p-0.5 ${myGroup ? "border-purple-400" : "border-white/20"}`}>
+                    <AvatarImage src={profile?.photoURL || undefined} alt="You" />
+                    <AvatarFallback>{profile?.displayName?.charAt(0) || "Y"}</AvatarFallback>
+                  </Avatar>
+                  <div
+                    className="absolute -bottom-1 -right-1 bg-white text-purple-600 rounded-full w-5 h-5 flex items-center justify-center border-2 border-black"
+                    onClick={(e) => { e.stopPropagation(); onAddStory(); }}
+                  >
+                    <UserPlus className="w-3 h-3" />
+                  </div>
+                </div>
+                <p className="text-xs text-white/80 truncate">Your Story</p>
+              </button>
+            </CarouselItem>
+
+            {otherGroups.map((group) => (
+              <CarouselItem key={group.authorUid} className="basis-auto pl-2">
+                <button onClick={() => setViewingGroup(group)} className="flex flex-col items-center gap-1.5 w-16 text-center">
+                  <Avatar className="w-14 h-14 border-2 border-purple-400 p-0.5">
+                    <AvatarImage src={group.authorPhotoURL || undefined} alt={group.authorDisplayName} />
+                    <AvatarFallback>{group.authorDisplayName.charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <p className="text-xs text-white/80 truncate">{group.authorDisplayName}</p>
+                </button>
+              </CarouselItem>
+            ))}
+          </CarouselContent>
         </Carousel>
-    </div>
+      </div>
+
+      {viewingGroup && (
+        <StoryViewer
+          authorName={viewingGroup.authorDisplayName}
+          authorAvatar={viewingGroup.authorPhotoURL}
+          stories={viewingGroup.stories}
+          onClose={() => setViewingGroup(null)}
+        />
+      )}
+    </>
   );
 };
 

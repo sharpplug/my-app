@@ -4,7 +4,7 @@ import React, { useState, useTransition, useEffect, useRef, useMemo, lazy, Suspe
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Camera, Image as ImageIcon, Sparkles, Heart, Send, BrainCircuit, Gift, Waves, MapPin, Users, Phone, X, Music, Trash2, Loader2, BookOpen, Megaphone } from "lucide-react";
+import { Camera, Image as ImageIcon, Sparkles, Heart, Send, BrainCircuit, Gift, Waves, MapPin, Users, Phone, X, Music, Trash2, Loader2, BookOpen, Megaphone, Download, Share2 } from "lucide-react";
 import Image from 'next/image';
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -34,6 +34,7 @@ import {
 import { sendGift, spendFunds } from "@/lib/wallet";
 import { useActiveAds, type Ad } from "@/lib/ads";
 import AdTierBadge from "@/components/ad-tier-badge";
+import { downloadMedia, shareMedia } from "@/lib/media-share";
 import { Timestamp } from "firebase/firestore";
 
 const PanoramaView = lazy(() => import('./panorama-view'));
@@ -225,6 +226,16 @@ const PostCard = ({ post, myUid, onOpen, onCall, onDelete }: { post: VibePost; m
         if (myUid) toggleWave(post.id, myUid).catch(() => {});
     };
 
+    const handleDownload = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (post.media?.[0]) downloadMedia(post.media[0], `moood-vibe-${post.id}`);
+    };
+
+    const handleShare = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (post.media?.[0]) shareMedia(post.media[0], `${post.authorDisplayName} on Moood`, post.text);
+    };
+
     return (
         <div className={cn("h-full w-full relative rounded-[2rem] overflow-hidden border transition-all hover:scale-[1.01] bg-black shadow-2xl", isHotspot ? "border-amber-400/20" : "border-white/10")} onClick={() => onOpen(post)}>
             {isLive ? (
@@ -280,6 +291,18 @@ const PostCard = ({ post, myUid, onOpen, onCall, onDelete }: { post: VibePost; m
                     <Waves className={cn("w-7 h-7 group-hover:scale-110 transition-transform", isWaved && "text-cyan-400")} />
                     <span className="text-[10px] font-bold">{post.waves || 0}</span>
                 </button>
+                {!isLive && post.media?.[0] && (
+                    <>
+                        <button className="group flex flex-col items-center gap-1" onClick={handleDownload}>
+                            <Download className="w-7 h-7 group-hover:scale-110 transition-transform" />
+                            <span className="text-[10px] font-bold">Save</span>
+                        </button>
+                        <button className="group flex flex-col items-center gap-1" onClick={handleShare}>
+                            <Share2 className="w-7 h-7 group-hover:scale-110 transition-transform" />
+                            <span className="text-[10px] font-bold">Share</span>
+                        </button>
+                    </>
+                )}
             </div>
             <AiAnalysisDialog post={post} open={isAnalyzing} onOpenChange={setIsAnalyzing} />
         </div>
@@ -362,7 +385,7 @@ const AiAnalysisDialog = ({ post, open, onOpenChange }: { post: VibePost; open: 
     );
 };
 
-export const CreateVibeDialog = ({ open, onOpenChange, profile }: { open: boolean, onOpenChange: (open: boolean) => void, profile: UserProfile | null }) => {
+export const CreateVibeDialog = ({ open, onOpenChange, profile, isStory = false }: { open: boolean, onOpenChange: (open: boolean) => void, profile: UserProfile | null, isStory?: boolean }) => {
     const [text, setText] = useState("");
     const [media, setMedia] = useState<{ uri: string, type: 'photo' | 'video' }[]>([]);
     const [selectedMusic, setSelectedMusic] = useState<typeof sampleMusic[0] | null>(null);
@@ -406,11 +429,12 @@ export const CreateVibeDialog = ({ open, onOpenChange, profile }: { open: boolea
     };
 
     const handleShare = async () => {
-        if (!profile || !text.trim()) return;
+        if (!profile || (!text.trim() && media.length === 0)) return;
         setIsPosting(true);
         try {
             await createVibePost(profile, {
                 type: 'post',
+                isStory,
                 text,
                 media: media.map(m => m.uri),
                 mediaTypes: media.map(m => m.type),
@@ -428,7 +452,12 @@ export const CreateVibeDialog = ({ open, onOpenChange, profile }: { open: boolea
         <>
             <Dialog open={open} onOpenChange={onOpenChange}>
                 <DialogContent className="bg-zinc-950/90 backdrop-blur-2xl border-white/10 text-white sm:rounded-[2.5rem]">
-                    <DialogHeader><DialogTitle className="font-headline text-3xl">New Vibe</DialogTitle></DialogHeader>
+                    <DialogHeader>
+                        <DialogTitle className="font-headline text-3xl">{isStory ? "New Story" : "New Vibe"}</DialogTitle>
+                        <DialogDescription className="text-white/50">
+                            {isStory ? "Disappears from your Story ring in 24 hours." : "Stays in the main feed for 48 hours."}
+                        </DialogDescription>
+                    </DialogHeader>
                     <div className="space-y-6 py-4">
                         <Textarea placeholder="What's the energy?..." className="bg-white/5 border-white/10 h-32 rounded-2xl text-lg" value={text} onChange={e => setText(e.target.value)} />
                         {media.length > 0 && (
@@ -476,8 +505,8 @@ export const CreateVibeDialog = ({ open, onOpenChange, profile }: { open: boolea
                     </div>
                     <DialogFooter className="flex-row gap-2">
                         <DialogClose asChild><Button variant="ghost" className="flex-1 rounded-full h-12 font-bold" onClick={reset}>Discard</Button></DialogClose>
-                        <Button className="flex-[2] rounded-full h-12 font-bold bg-white text-black hover:bg-zinc-200" onClick={handleShare} disabled={isPosting || !text.trim()}>
-                            {isPosting ? <Loader2 className="animate-spin mr-2" /> : null} Share Vibe
+                        <Button className="flex-[2] rounded-full h-12 font-bold bg-white text-black hover:bg-zinc-200" onClick={handleShare} disabled={isPosting || (!text.trim() && media.length === 0)}>
+                            {isPosting ? <Loader2 className="animate-spin mr-2" /> : null} {isStory ? "Share Story" : "Share Vibe"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
