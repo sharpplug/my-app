@@ -8,7 +8,7 @@ import { Camera, FileText, Loader2, Upload } from "lucide-react";
 import CameraView from "./camera-view";
 import MoodCard from "./mood-card";
 import SkinCard from "./skin-card";
-import { getAuraAnalysis, AuraAnalysisResult } from "@/app/actions";
+import { getAuraAnalysis, generateDynamicTheme, AuraAnalysisResult } from "@/app/actions";
 import { useDynamicTheme } from "@/contexts/theme-provider";
 import { useToast } from "@/hooks/use-toast";
 import { getIdToken } from "@/lib/get-id-token";
@@ -33,9 +33,31 @@ export default function AuraAnalysis() {
   const [photoDataUri, setPhotoDataUri] = useState<string | null>(null);
   const [results, setResults] = useState<AuraAnalysisResult | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isRefreshingTheme, setIsRefreshingTheme] = useState(false);
   const { applyTheme } = useDynamicTheme();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // recommendedThemeColors above already comes bundled with the mood
+  // analysis, so the app's theme changes automatically on first analysis
+  // without a second AI round-trip. generateDynamicTheme earns its keep as
+  // a "different palette for the same mood" refresh, rather than a
+  // redundant call that would just re-derive what analyzeUserMood already
+  // returned.
+  const handleRefreshTheme = async () => {
+    if (!results?.mood.mood) return;
+    setIsRefreshingTheme(true);
+    try {
+      const idToken = await getIdToken();
+      const theme = await generateDynamicTheme(idToken, { mood: results.mood.mood });
+      applyTheme(theme);
+      toast({ title: `New theme: ${theme.themeName}` });
+    } catch (error) {
+      toast({ variant: "destructive", title: "Couldn't refresh theme", description: error instanceof Error ? error.message : "Please try again." });
+    } finally {
+      setIsRefreshingTheme(false);
+    }
+  };
 
   const handleUsePhoto = (dataUri: string) => {
     setPhotoDataUri(dataUri);
@@ -126,7 +148,12 @@ export default function AuraAnalysis() {
       <div className="flex flex-col gap-8">
         <MoodCard moodResult={results.mood} />
         {results.skin && <SkinCard skinResult={results.skin} />}
-        <Button onClick={resetState} variant="outline" className="w-full sm:w-auto mx-auto">Start New Analysis</Button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto mx-auto">
+          <Button onClick={resetState} variant="outline">Start New Analysis</Button>
+          <Button onClick={handleRefreshTheme} variant="ghost" disabled={isRefreshingTheme}>
+            {isRefreshingTheme ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null} Try a Different Theme
+          </Button>
+        </div>
       </div>
     );
   }

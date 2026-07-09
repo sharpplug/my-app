@@ -14,6 +14,11 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Badge } from "./ui/badge";
 import { Card, CardContent, CardHeader, CardTitle as CardTitleComponent } from "./ui/card";
 import type { PlanMyDayOutput } from "@/app/actions";
+import { useAuth } from "@/contexts/auth-provider";
+import { spendFunds } from "@/lib/wallet";
+import { mockEvents, mockServiceItems } from "@/lib/catalog-data";
+
+const parseFareToNumber = (fare: string) => parseFloat(fare.replace(/[^0-9.]/g, '')) || 0;
 
 
 const WelcomeMessage = () => (
@@ -31,10 +36,32 @@ const WelcomeMessage = () => (
 
 const ResultDisplay = ({ result, onNavigate }: { result: PlanMyDayOutput; onNavigate: () => void }) => {
     const router = useRouter();
+    const { user } = useAuth();
+    const { toast } = useToast();
+    const [bookingKey, setBookingKey] = useState<string | null>(null);
 
     const goTo = (path: string) => {
         router.push(path);
         onNavigate();
+    };
+
+    // "Book This For Me" only appears where there's something real to book
+    // against - a suggested event/food item that matches Moood's actual
+    // catalog (src/lib/catalog-data.ts), or the trip plan's own AI-estimated
+    // fare. Otherwise the AI's suggestion may not correspond to anything
+    // purchasable, so it stays a "View"/search deep-link instead of
+    // pretending to book something that doesn't exist.
+    const handleBook = async (key: string, item: string, amount: number) => {
+        if (!user) return;
+        setBookingKey(key);
+        try {
+            await spendFunds(user.uid, item, amount);
+            toast({ title: "Booked!", description: `${item} confirmed - paid from your Moood wallet.` });
+        } catch (err) {
+            toast({ variant: 'destructive', title: "Booking Failed", description: err instanceof Error ? err.message : "Please try again." });
+        } finally {
+            setBookingKey(null);
+        }
     };
 
     return (
@@ -67,18 +94,28 @@ const ResultDisplay = ({ result, onNavigate }: { result: PlanMyDayOutput; onNavi
                         <CardTitleComponent className="text-base flex items-center gap-2"><Calendar/> Event & Service Suggestions</CardTitleComponent>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                        {result.suggestedEvents.map((event, i) => (
-                             <div key={i} className="p-3 border rounded-lg text-sm flex items-center justify-between gap-3">
-                                <div>
-                                    <p className="font-bold">{event.title}</p>
-                                    <p className="text-muted-foreground">{event.time} at {event.location}</p>
-                                    <p className="text-xs italic mt-1">"{event.reason}"</p>
+                        {result.suggestedEvents.map((event, i) => {
+                            const matched = mockEvents.find(e => e.title.toLowerCase() === event.title.toLowerCase());
+                            const key = `event-${i}`;
+                            return (
+                                <div key={i} className="p-3 border rounded-lg text-sm flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="font-bold">{event.title}</p>
+                                        <p className="text-muted-foreground">{event.time} at {event.location}</p>
+                                        <p className="text-xs italic mt-1">"{event.reason}"</p>
+                                    </div>
+                                    {matched ? (
+                                        <Button size="sm" className="shrink-0 gap-1" onClick={() => handleBook(key, matched.title, matched.priceValue)} disabled={bookingKey === key}>
+                                            {bookingKey === key ? "Booking..." : "Book Now"}
+                                        </Button>
+                                    ) : (
+                                        <Button size="sm" variant="outline" className="shrink-0 gap-1" onClick={() => goTo(`/events?q=${encodeURIComponent(event.title)}`)}>
+                                            View <ArrowRight className="w-3 h-3" />
+                                        </Button>
+                                    )}
                                 </div>
-                                <Button size="sm" variant="outline" className="shrink-0 gap-1" onClick={() => goTo(`/events?q=${encodeURIComponent(event.title)}`)}>
-                                    View <ArrowRight className="w-3 h-3" />
-                                </Button>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </CardContent>
                 </Card>
             )}
@@ -89,14 +126,24 @@ const ResultDisplay = ({ result, onNavigate }: { result: PlanMyDayOutput; onNavi
                         <CardTitleComponent className="text-base flex items-center gap-2"><Utensils/> Food Plan</CardTitleComponent>
                     </CardHeader>
                     <CardContent className="space-y-2">
-                        {result.foodRecommendations.map((food, i) => (
-                             <div key={i} className="flex justify-between items-center text-sm">
-                                <span><Badge variant="secondary">{food.meal}</Badge> {food.suggestion}</span>
-                                <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => goTo(`/shop?q=${encodeURIComponent(food.suggestion)}`)}>
-                                    {food.venue_type} <ArrowRight className="w-3 h-3" />
-                                </Button>
-                            </div>
-                        ))}
+                        {result.foodRecommendations.map((food, i) => {
+                            const matched = mockServiceItems.find(item => item.title.toLowerCase().includes(food.suggestion.toLowerCase()) || food.suggestion.toLowerCase().includes(item.title.toLowerCase()));
+                            const key = `food-${i}`;
+                            return (
+                                <div key={i} className="flex justify-between items-center text-sm">
+                                    <span><Badge variant="secondary">{food.meal}</Badge> {food.suggestion}</span>
+                                    {matched ? (
+                                        <Button size="sm" variant="secondary" className="h-7 gap-1 text-xs" onClick={() => handleBook(key, matched.title, matched.price)} disabled={bookingKey === key}>
+                                            {bookingKey === key ? "Booking..." : "Book Now"}
+                                        </Button>
+                                    ) : (
+                                        <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => goTo(`/shop?q=${encodeURIComponent(food.suggestion)}`)}>
+                                            {food.venue_type} <ArrowRight className="w-3 h-3" />
+                                        </Button>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </CardContent>
                 </Card>
             )}
@@ -112,9 +159,19 @@ const ResultDisplay = ({ result, onNavigate }: { result: PlanMyDayOutput; onNavi
                             <p className="text-sm italic">"{result.tripPlan.summary}"</p>
                          </div>
                          <p className="text-center text-lg font-bold">{result.tripPlan.estimatedFare}</p>
-                         <Button className="w-full gap-2" onClick={() => goTo('/skip')}>
-                            Book with SKIP <ArrowRight className="w-4 h-4" />
-                         </Button>
+                         <div className="grid grid-cols-2 gap-2">
+                             <Button
+                                variant="secondary"
+                                className="gap-2"
+                                onClick={() => handleBook('trip', 'Naya Trip Plan', parseFareToNumber(result.tripPlan!.estimatedFare))}
+                                disabled={bookingKey === 'trip'}
+                             >
+                                {bookingKey === 'trip' ? "Booking..." : "Book Now"}
+                             </Button>
+                             <Button className="gap-2" onClick={() => goTo('/skip')}>
+                                Customize in SKIP <ArrowRight className="w-4 h-4" />
+                             </Button>
+                         </div>
                     </CardContent>
                 </Card>
             )}
