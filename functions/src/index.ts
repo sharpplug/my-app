@@ -16,9 +16,30 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Transaction } from "firebase-admin/firestore";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
+import { defineSecret } from "firebase-functions/params";
 
 initializeApp();
 const db = getFirestore();
+
+// Secret Manager-backed rather than a plain env var - set it with
+// `firebase functions:secrets:set PAYMENT_WEBHOOK_SECRET` once a real
+// payment aggregator is connected. Cloud Functions injects it at
+// invocation time only for functions that list it in `secrets: [...]`
+// below; it's never checked into source or config files.
+const paymentWebhookSecret = defineSecret("PAYMENT_WEBHOOK_SECRET");
+
+// App Check is Firebase's equivalent of a firewall in front of these
+// functions - it rejects calls that don't carry a valid attestation token
+// proving the request came from this app's real client (not a script or a
+// replayed request), before the handler ever runs. It stays off
+// (enforceAppCheck: false) until the client is verified to be sending
+// tokens (see src/lib/firebase-config.ts's NEXT_PUBLIC_RECAPTCHA_SITE_KEY),
+// because flipping this on without a working client integration would
+// reject every legitimate call too. Set APP_CHECK_ENFORCE=true (via
+// `firebase functions:config:set` or the Cloud Run env var) once App Check
+// is registered in the Firebase Console and traffic in its dashboard shows
+// verified requests from real clients.
+const ENFORCE_APP_CHECK = process.env.APP_CHECK_ENFORCE === "true";
 
 const TRANSACTION_FEE_PERCENT = 0.005;
 const MOOOD_TOKEN_RATE = 2;
@@ -86,6 +107,37 @@ function requireAuth(request: { auth?: { uid: string } | null }): string {
   return request.auth.uid;
 }
 
+const rateLimitRef = (key: string) => db.collection("rateLimits").doc(key);
+
+/**
+ * Distributed rate limiting for every wallet-mutating function - these
+ * move real money, so unlike a slow AI flow, a burst of automated calls is
+ * both a cost risk and an abuse vector (e.g. hammering sendFunds/spendFunds
+ * to drain fees or explore error messages for account enumeration).
+ * Firestore-backed rather than in-memory since Cloud Functions scale
+ * horizontally by default - each invocation could land on a different
+ * instance.
+ */
+async function enforceRateLimit(uid: string, flowKey: string, max: number, windowMs: number): Promise<void> {
+  const key = `${uid}_${flowKey}`;
+  await db.runTransaction(async (tx) => {
+    const ref = rateLimitRef(key);
+    const snap = await tx.get(ref);
+    const now = Date.now();
+    const data = snap.data() as { count: number; windowStart: number } | undefined;
+
+    if (!data || now - data.windowStart >= windowMs) {
+      tx.set(ref, { count: 1, windowStart: now });
+      return;
+    }
+    if (data.count >= max) {
+      const retryInSeconds = Math.ceil((windowMs - (now - data.windowStart)) / 1000);
+      throw new HttpsError("resource-exhausted", `You're doing that a lot - please try again in ${retryInSeconds}s.`);
+    }
+    tx.update(ref, { count: data.count + 1 });
+  });
+}
+
 async function requireHandle(uid: string): Promise<string> {
   const snap = await userRef(uid).get();
   const handle = snap.data()?.handle;
@@ -104,7 +156,7 @@ async function getWalletBalances(tx: Transaction, uid: string) {
   };
 }
 
-export const ensureWallet = onCall(async (request) => {
+export const ensureWallet = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
 
   await db.runTransaction(async (tx) => {
@@ -122,8 +174,9 @@ export const ensureWallet = onCall(async (request) => {
   return { ok: true };
 });
 
-export const sendFunds = onCall(async (request) => {
+export const sendFunds = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const senderUid = requireAuth(request);
+  await enforceRateLimit(senderUid, "sendFunds", 10, 60_000);
   const { recipientUid, amount } = (request.data ?? {}) as { recipientUid?: string; amount?: number };
 
   if (typeof recipientUid !== "string" || !recipientUid) {
@@ -177,8 +230,9 @@ export const sendFunds = onCall(async (request) => {
   return { ok: true };
 });
 
-export const sendGift = onCall(async (request) => {
+export const sendGift = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const viewerUid = requireAuth(request);
+  await enforceRateLimit(viewerUid, "sendGift", 30, 60_000);
   const { streamerUid, giftName, price } = (request.data ?? {}) as {
     streamerUid?: string;
     giftName?: string;
@@ -239,8 +293,9 @@ export const sendGift = onCall(async (request) => {
   return { ok: true };
 });
 
-export const spendFunds = onCall(async (request) => {
+export const spendFunds = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
+  await enforceRateLimit(uid, "spendFunds", 30, 60_000);
   const { item, amount, productId } = (request.data ?? {}) as { item?: string; amount?: number; productId?: string };
 
   // Real marketplace listings (functions/src/index.ts's products collection,
@@ -370,8 +425,9 @@ async function completeTopUpIntent(intentId: string): Promise<void> {
   });
 }
 
-export const initiateTopUp = onCall(async (request) => {
+export const initiateTopUp = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
+  await enforceRateLimit(uid, "initiateTopUp", 5, 60_000);
   const { amount, rail, phone } = (request.data ?? {}) as { amount?: number; rail?: string; phone?: string };
 
   if (typeof amount !== "number" || !(amount > 0)) {
@@ -413,8 +469,12 @@ export const initiateTopUp = onCall(async (request) => {
  * so an unsigned or wrongly-signed request is indistinguishable from an
  * attacker POSTing a fake "payment succeeded" event.
  */
-export const topUpWebhook = onRequest(async (req, res) => {
-  const secret = process.env.PAYMENT_WEBHOOK_SECRET;
+export const topUpWebhook = onRequest({ secrets: [paymentWebhookSecret] }, async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).send("Method not allowed.");
+    return;
+  }
+  const secret = paymentWebhookSecret.value();
   const signature = req.get("X-Webhook-Signature");
 
   if (!secret) {
@@ -452,8 +512,9 @@ function verifySignature(rawBody: Buffer, signatureHeader: string, secret: strin
   return timingSafeEqual(expectedBuf, providedBuf);
 }
 
-export const simulateTopUpConfirmation = onCall(async (request) => {
+export const simulateTopUpConfirmation = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
+  await enforceRateLimit(uid, "simulateTopUpConfirmation", 10, 60_000);
   const { intentId } = (request.data ?? {}) as { intentId?: string };
 
   if (typeof intentId !== "string" || !intentId) {
@@ -479,8 +540,9 @@ export const simulateTopUpConfirmation = onCall(async (request) => {
   return { ok: true };
 });
 
-export const swapAssets = onCall(async (request) => {
+export const swapAssets = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
+  await enforceRateLimit(uid, "swapAssets", 15, 60_000);
   const { direction, amount } = (request.data ?? {}) as {
     direction?: "cashToToken" | "tokenToCash";
     amount?: number;
@@ -537,8 +599,9 @@ export const swapAssets = onCall(async (request) => {
  * whether the aggregator's payout to the user's phone/bank/card actually
  * lands - if it fails, refundFailedWithdrawal puts the money back.
  */
-export const initiateWithdrawal = onCall(async (request) => {
+export const initiateWithdrawal = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
+  await enforceRateLimit(uid, "initiateWithdrawal", 5, 60_000);
   const { amount, rail, phone } = (request.data ?? {}) as { amount?: number; rail?: string; phone?: string };
 
   if (typeof amount !== "number" || !(amount > 0)) {
@@ -585,8 +648,12 @@ export const initiateWithdrawal = onCall(async (request) => {
  * same signature-verification requirement as topUpWebhook, since this is
  * also an unauthenticated server-to-server callback.
  */
-export const payoutWebhook = onRequest(async (req, res) => {
-  const secret = process.env.PAYMENT_WEBHOOK_SECRET;
+export const payoutWebhook = onRequest({ secrets: [paymentWebhookSecret] }, async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).send("Method not allowed.");
+    return;
+  }
+  const secret = paymentWebhookSecret.value();
   const signature = req.get("X-Webhook-Signature");
 
   if (!secret) {
@@ -641,8 +708,9 @@ async function refundFailedWithdrawal(intentId: string): Promise<void> {
   });
 }
 
-export const simulateWithdrawalConfirmation = onCall(async (request) => {
+export const simulateWithdrawalConfirmation = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
+  await enforceRateLimit(uid, "simulateWithdrawalConfirmation", 10, 60_000);
   const { intentId } = (request.data ?? {}) as { intentId?: string };
 
   if (typeof intentId !== "string" || !intentId) {

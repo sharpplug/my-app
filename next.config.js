@@ -5,14 +5,18 @@
 // been verified against a live browser session (this environment can't
 // complete calls to Firebase Auth), so treat it as a strong baseline to
 // confirm against real traffic, not a guarantee.
+// App Check's ReCaptchaV3Provider (src/lib/firebase-config.ts) needs
+// google.com/gstatic.com for its script + verification calls, and renders
+// an invisible challenge in a google.com iframe - all three added below so
+// enabling a real reCAPTCHA site key doesn't get silently blocked by CSP.
 const csp = [
   `default-src 'self'`,
-  `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com`,
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com https://www.google.com`,
   `style-src 'self' 'unsafe-inline'`,
   `img-src 'self' data: blob: https://picsum.photos https://placehold.co https://storage.googleapis.com https://*.tile.openstreetmap.org https://lh3.googleusercontent.com https://*.googleusercontent.com`,
   `font-src 'self' data:`,
-  `connect-src 'self' https://*.googleapis.com https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com wss://*.firebaseio.com https://*.firebaseio.com https://*.tile.openstreetmap.org`,
-  `frame-src 'self' https://*.firebaseapp.com https://accounts.google.com`,
+  `connect-src 'self' https://*.googleapis.com https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://firebaseappcheck.googleapis.com wss://*.firebaseio.com https://*.firebaseio.com https://*.tile.openstreetmap.org`,
+  `frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://www.google.com`,
   `media-src 'self' blob: data: https://storage.googleapis.com`,
   `worker-src 'self' blob:`,
   `object-src 'none'`,

@@ -5,6 +5,35 @@
 cdn: true
 
 runConfig:
-  # Increase this value if you'd like to automatically spin up
-  # more instances in response to increased traffic.
-  maxInstances: 1
+  # Was pinned to 1 while rate limiting was in-memory-per-instance (see
+  # src/lib/rate-limit.ts) - a second instance would have reset everyone's
+  # throttling for free. Rate limiting is now Firestore-backed and shared
+  # across instances, so it's safe to scale horizontally. Raise further if
+  # traffic outgrows this; there's no code-level ceiling anymore.
+  maxInstances: 10
+  minInstances: 0
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+# Runtime environment variables. Secrets are pulled from Secret Manager at
+# build/run time rather than checked in - create/update them with:
+#   firebase apphosting:secrets:set GEMINI_API_KEY
+# (grants this backend access on first set; see Firebase console > App
+# Hosting > your backend > Secrets if it needs re-granting after a change).
+env:
+  - variable: GEMINI_API_KEY
+    secret: GEMINI_API_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+  # Public (non-secret) reCAPTCHA v3 site key for Firebase App Check (see
+  # src/lib/firebase-config.ts) - create one at
+  # https://console.firebase.google.com/project/moood-85d1s/appcheck and
+  # uncomment once you have it. Until then App Check simply doesn't
+  # initialize; nothing breaks.
+  # - variable: NEXT_PUBLIC_RECAPTCHA_SITE_KEY
+  #   value: "<your-recaptcha-v3-site-key>"
+  #   availability:
+  #     - BUILD
+  #     - RUNTIME

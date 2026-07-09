@@ -105,7 +105,7 @@ export async function getAuraAnalysis(
   input: AnalyzeUserMoodInput & Partial<AnalyzeSkinConditionInput>
 ): Promise<AuraAnalysisResult> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "getAuraAnalysis", TIGHT);
+  await enforceRateLimit(uid, "getAuraAnalysis", TIGHT);
   try {
     const moodResult = await analyzeUserMood({
       photoDataUri: input.photoDataUri,
@@ -144,91 +144,91 @@ export async function getAuraAnalysis(
 
 export async function generateDynamicTheme(idToken: string, input: GenerateDynamicThemeInput): Promise<GenerateDynamicThemeOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "generateDynamicTheme", GENEROUS);
+  await enforceRateLimit(uid, "generateDynamicTheme", GENEROUS);
   return generateDynamicThemeFlow(input);
 }
 
 export async function getNayaHealth(idToken: string, input: AnalyzeNayaHealthInput): Promise<AnalyzeNayaHealthOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "getNayaHealth", TIGHT);
+  await enforceRateLimit(uid, "getNayaHealth", TIGHT);
   return analyzeNayaHealth(input);
 }
 
 export async function generateProductDescription(idToken: string, input: GenerateProductDescriptionInput): Promise<GenerateProductDescriptionOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "generateProductDescription", GENEROUS);
+  await enforceRateLimit(uid, "generateProductDescription", GENEROUS);
   return generateProductDescriptionFlow(input);
 }
 
 export async function generateEventDescription(idToken: string, input: GenerateEventDescriptionInput): Promise<GenerateEventDescriptionOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "generateEventDescription", GENEROUS);
+  await enforceRateLimit(uid, "generateEventDescription", GENEROUS);
   return generateEventDescriptionFlow(input);
 }
 
 export async function aiCareerCoach(idToken: string, input: AiCareerCoachInput): Promise<AiCareerCoachOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "aiCareerCoach", GENEROUS);
+  await enforceRateLimit(uid, "aiCareerCoach", GENEROUS);
   return aiCareerCoachFlow(input);
 }
 
 export async function recommendVibes(idToken: string, input: RecommendVibesInput): Promise<RecommendVibesOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "recommendVibes", GENEROUS);
+  await enforceRateLimit(uid, "recommendVibes", GENEROUS);
   return recommendVibesFlow(input);
 }
 
 export async function aiSafetyCheckIn(idToken: string, input: AiSafetyCheckInInput): Promise<AiSafetyCheckInOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "aiSafetyCheckIn", GENEROUS);
+  await enforceRateLimit(uid, "aiSafetyCheckIn", GENEROUS);
   return aiSafetyCheckInFlow(input);
 }
 
 export async function planComplexTrip(idToken: string, input: PlanComplexTripInput): Promise<PlanComplexTripOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "planComplexTrip", GENEROUS);
+  await enforceRateLimit(uid, "planComplexTrip", GENEROUS);
   return planComplexTripFlow(input);
 }
 
 export async function planMyDay(idToken: string, input: PlanMyDayInput): Promise<PlanMyDayOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "planMyDay", GENEROUS);
+  await enforceRateLimit(uid, "planMyDay", GENEROUS);
   return planMyDayFlow(input);
 }
 
 export async function virtualTryOn(idToken: string, input: VirtualTryOnInput): Promise<VirtualTryOnOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "virtualTryOn", TIGHT);
+  await enforceRateLimit(uid, "virtualTryOn", TIGHT);
   return virtualTryOnFlow(input);
 }
 
 export async function planChauffeurFromCalendar(idToken: string, input: PlanChauffeurFromCalendarInput): Promise<PlanChauffeurFromCalendarOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "planChauffeurFromCalendar", GENEROUS);
+  await enforceRateLimit(uid, "planChauffeurFromCalendar", GENEROUS);
   return planChauffeurFromCalendarFlow(input);
 }
 
 export async function analyzeVibePost(idToken: string, input: AnalyzeVibePostInput): Promise<AnalyzeVibePostOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "analyzeVibePost", GENEROUS);
+  await enforceRateLimit(uid, "analyzeVibePost", GENEROUS);
   return analyzeVibePostFlow(input);
 }
 
 export async function nayaCallResponse(idToken: string, input: NayaCallInput): Promise<NayaCallOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "nayaCallResponse", GENEROUS);
+  await enforceRateLimit(uid, "nayaCallResponse", GENEROUS);
   return nayaCallResponseFlow(input);
 }
 
 export async function generateVibeVideoAction(idToken: string, input: GenerateVibeVideoInput): Promise<GenerateVibeVideoOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "generateVibeVideoAction", { max: 3, windowMs: 60_000 });
+  await enforceRateLimit(uid, "generateVibeVideoAction", { max: 3, windowMs: 60_000 });
   return generateVibeVideo(input);
 }
 
 export async function generateStoryAction(idToken: string, input: GenerateStoryInput): Promise<GenerateStoryOutput> {
   const uid = await requireAuth(idToken);
-  enforceRateLimit(uid, "generateStoryAction", TIGHT);
+  await enforceRateLimit(uid, "generateStoryAction", TIGHT);
   return generateStory(input);
 }
 

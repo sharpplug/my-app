@@ -62,6 +62,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Rate-limit counters (src/lib/rate-limit.ts, functions/src/index.ts).
+    // Written only by the Admin SDK from a trusted server context (Next.js
+    // Server Actions via Application Default Credentials, or Cloud
+    // Functions) - a client being able to read or reset its own counter
+    // would defeat the point of it.
+    match /rateLimits/{id} {
+      allow read, write: if false;
+    }
+
     // Cross-vertical notifications (wallet receives, gifts, sales,
     // top-ups, withdrawals - see functions/src/index.ts's notify()). Only
     // the Cloud Functions that cause these events create them; the client
