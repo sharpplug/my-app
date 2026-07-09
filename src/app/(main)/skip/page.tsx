@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useMemo, useTransition, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,7 +85,13 @@ const courierRideOptions: RideOption[] = [
 
 const aiSuggestions = ["Work in Downtown", "Airport Transfer", "Mall of the Emirates", "Beach Gathering"];
 
-const InitialStep = ({ activeTab, onTabChange, onFindRide, onOpenAiPlanner, currency }: { activeTab: RideType, onTabChange: (tab: RideType) => void, onFindRide: () => void, onOpenAiPlanner: () => void, currency: any }) => (
+const InitialStep = ({
+  activeTab, onTabChange, onFindRide, onOpenAiPlanner, currency,
+  pickup, destination, onPickupChange, onDestinationChange, onSelectSuggestion,
+}: {
+  activeTab: RideType, onTabChange: (tab: RideType) => void, onFindRide: () => void, onOpenAiPlanner: () => void, currency: any,
+  pickup: string, destination: string, onPickupChange: (v: string) => void, onDestinationChange: (v: string) => void, onSelectSuggestion: (s: string) => void,
+}) => (
     <div className="space-y-6 pb-4">
       <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as RideType)} className="w-full">
         <TabsList className="grid w-full grid-cols-2 rounded-2xl p-1.5 h-auto bg-muted">
@@ -99,14 +106,27 @@ const InitialStep = ({ activeTab, onTabChange, onFindRide, onOpenAiPlanner, curr
                 <div className="w-2.5 h-2.5 rounded-full border-2 border-primary bg-background" />
                 <div className="w-0.5 h-10 bg-gradient-to-b from-primary to-transparent opacity-20" />
             </div>
-            <Input placeholder="Pick-up location" className="pl-12 h-14 rounded-2xl bg-muted/50 border-0 text-base font-medium focus-visible:ring-primary/20" />
+            <Input
+              placeholder="Pick-up location"
+              className="pl-12 h-14 rounded-2xl bg-muted/50 border-0 text-base font-medium focus-visible:ring-primary/20"
+              value={pickup}
+              onChange={(e) => onPickupChange(e.target.value)}
+            />
         </div>
         <div className="relative">
             <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-primary animate-pulse" />
-            <Input placeholder={activeTab === 'personal' ? "Where are we headed?" : "Drop-off destination"} className="pl-12 h-14 rounded-2xl bg-muted/50 border-0 text-base font-medium focus-visible:ring-primary/20" />
+            <Input
+              placeholder={activeTab === 'personal' ? "Where are we headed?" : "Drop-off destination"}
+              className="pl-12 h-14 rounded-2xl bg-muted/50 border-0 text-base font-medium focus-visible:ring-primary/20"
+              value={destination}
+              onChange={(e) => onDestinationChange(e.target.value)}
+            />
         </div>
+        <Button className="w-full h-12 rounded-xl font-bold" onClick={onFindRide} disabled={!destination.trim()}>
+          Find a Ride
+        </Button>
       </div>
-      
+
        <Button variant="premium" className="w-full h-16 rounded-[1.5rem] justify-start px-6 group transition-all hover:scale-[1.02]" onClick={onOpenAiPlanner}>
           <div className="flex items-center gap-4 w-full">
             <div className="p-2.5 bg-amber-400 rounded-xl text-black group-hover:rotate-12 transition-transform">
@@ -119,12 +139,12 @@ const InitialStep = ({ activeTab, onTabChange, onFindRide, onOpenAiPlanner, curr
             <ChevronRight className="w-5 h-5 opacity-40 group-hover:translate-x-1 transition-transform text-white" />
           </div>
        </Button>
-      
+
       <div className="space-y-3">
          <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground flex items-center gap-2 ml-1">Suggested Destinations</h3>
          <div className="flex flex-wrap gap-2">
             {aiSuggestions.map(s => (
-                <Button key={s} variant="outline" size="sm" className="rounded-full border-muted h-9 px-4 font-bold text-xs bg-muted/30" onClick={onFindRide}>
+                <Button key={s} variant="outline" size="sm" className="rounded-full border-muted h-9 px-4 font-bold text-xs bg-muted/30" onClick={() => onSelectSuggestion(s)}>
                     {s}
                 </Button>
             ))}
@@ -208,6 +228,7 @@ const PaymentStep = ({ ride, rideType, onConfirm, onBack, currency, region, isPa
 );
 
 export default function SkipPage() {
+  const searchParams = useSearchParams();
   const [step, setStep] = useState<RideStep>('initial');
   const [activeTab, setActiveTab] = useState<RideType>('personal');
   const [isSheetOpen, setIsSheetOpen] = useState(true);
@@ -216,11 +237,24 @@ export default function SkipPage() {
   const [activeCallTarget, setActiveCallTarget] = useState<CallTarget | null>(null);
   const [isPlanning, startPlanning] = useTransition();
   const [isPaying, setIsPaying] = useState(false);
+  const [pickup, setPickup] = useState('Current Location');
+  const [destination, setDestination] = useState('');
   const { toast } = useToast();
   const { currency, region } = useRegional();
   const { user } = useAuth();
 
   const rideOptions = activeTab === 'personal' ? personalRideOptions : courierRideOptions;
+
+  // Deep-linked from the Vibes Map's "Get a ride here" action on a friend's
+  // live location (see vibes-map.tsx) - jumps straight to vehicle selection
+  // instead of making the user retype a destination that's already known.
+  useEffect(() => {
+    const label = searchParams.get('label');
+    if (!label) return;
+    setDestination(label);
+    setActiveTab('personal');
+    setStep('vehicles');
+  }, [searchParams]);
 
   const handlePlanTrip = (request: string) => {
       if (!request.trim()) return;
@@ -323,7 +357,18 @@ export default function SkipPage() {
                           </div>
                       </div>
                   ) : step === 'initial' ? (
-                      <InitialStep activeTab={activeTab} onTabChange={setActiveTab} onFindRide={() => setStep('vehicles')} onOpenAiPlanner={() => setStep('itinerary')} currency={currency} />
+                      <InitialStep
+                        activeTab={activeTab}
+                        onTabChange={setActiveTab}
+                        onFindRide={() => setStep('vehicles')}
+                        onOpenAiPlanner={() => setStep('itinerary')}
+                        currency={currency}
+                        pickup={pickup}
+                        destination={destination}
+                        onPickupChange={setPickup}
+                        onDestinationChange={setDestination}
+                        onSelectSuggestion={(s) => { setDestination(s); setStep('vehicles'); }}
+                      />
                   ) : step === 'vehicles' ? (
                       <VehicleSelectionStep rideOptions={rideOptions} onSelectRide={handleRideSelect} onBack={() => setStep('initial')} currency={currency} />
                   ) : step === 'payment' && selectedRide ? (

@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -96,6 +97,7 @@ const SponsoredMessage = () => (
 
 
 export default function MessagesView() {
+    const searchParams = useSearchParams();
     const [conversations, setConversations] = useState(mockConversations);
     const [selectedConversationId, setSelectedConversationId] = useState<number | null>(conversations.find(c => c.unread > 0)?.id || mockConversations[0]?.id || null);
     const [message, setMessage] = useState('');
@@ -108,6 +110,24 @@ export default function MessagesView() {
     const { toast } = useToast();
 
     const selectedConversation = conversations.find(c => c.id === selectedConversationId);
+
+    // Deep-linked from the Vibes Map's "Message" action on a friend's live
+    // location pin (see vibes-map.tsx). These conversations are mock/local
+    // data rather than real per-user threads, so this is a best-effort
+    // name match rather than a guaranteed conversation - if nobody in the
+    // (currently fake) conversation list matches, we say so instead of
+    // silently landing on the wrong chat.
+    useEffect(() => {
+        const to = searchParams.get('to');
+        if (!to) return;
+        const match = conversations.find(c => c.name.toLowerCase() === to.toLowerCase());
+        if (match) {
+            setSelectedConversationId(match.id);
+        } else {
+            toast({ title: "No conversation yet", description: `You don't have a chat with @${to} yet.` });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams]);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];

@@ -8,9 +8,11 @@ import { useAuth } from "@/contexts/auth-provider";
 import { publishPresence, clearPresence, subscribeToPresence, type Presence } from "@/lib/presence";
 import { subscribeToUserProfile, type UserProfile } from "@/lib/users";
 import { Switch } from "@/components/ui/switch";
-import { Ghost } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Ghost, MessageCircle, Car } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 
 const DEFAULT_CENTER: [number, number] = [25.2048, 55.2708]; // Dubai
 
@@ -34,6 +36,7 @@ function Recenter({ center }: { center: [number, number] }) {
 export default function VibesMap() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const router = useRouter();
   const [myProfile, setMyProfile] = useState<UserProfile | null>(null);
   const [ghostMode, setGhostMode] = useState(false);
   const [myPosition, setMyPosition] = useState<[number, number] | null>(null);
@@ -113,8 +116,31 @@ export default function VibesMap() {
         {visibleOthers.map((p) => (
           <Marker key={p.uid} position={[p.lat, p.lng]} icon={markerIcon("#22D3EE")}>
             <Popup>
-              <div className="font-bold">{p.displayName}</div>
-              <div className="text-xs text-muted-foreground">@{p.handle}</div>
+              <div className="space-y-2 min-w-[140px]">
+                <div>
+                  <div className="font-bold">{p.displayName}</div>
+                  <div className="text-xs text-muted-foreground">@{p.handle}</div>
+                </div>
+                <div className="flex gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-[11px] gap-1"
+                    onClick={() => router.push(`/messages?to=${encodeURIComponent(p.handle)}`)}
+                  >
+                    <MessageCircle className="w-3 h-3" /> Message
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] gap-1"
+                    onClick={() => router.push(`/skip?label=${encodeURIComponent(p.displayName)}&lat=${p.lat}&lng=${p.lng}`)}
+                  >
+                    <Car className="w-3 h-3" /> Get a ride here
+                  </Button>
+                </div>
+              </div>
             </Popup>
           </Marker>
         ))}
