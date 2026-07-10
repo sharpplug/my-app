@@ -39,6 +39,7 @@ import {
     Calendar,
     Megaphone,
     Share2,
+    Waves,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -73,6 +74,9 @@ import ShareAppDialog from "@/components/share-app-dialog";
 import { subscribeToMyVibePosts, type VibePost } from "@/lib/vibes";
 import { subscribeToFollowing } from "@/lib/social";
 import { downloadMedia, shareMedia } from "@/lib/media-share";
+import ExpenditureCharts from "@/components/expenditure-charts";
+import AdTierBadge from "@/components/ad-tier-badge";
+import { TIER_INFO, subscribeToMyAds, type Ad, type AdTier as AdTierType } from "@/lib/ads";
 import { aiCareerCoach } from "@/app/actions";
 import { getIdToken } from "@/lib/get-id-token";
 
@@ -187,7 +191,6 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
     const { toast } = useToast();
     const [bio, setBio] = useState("Exploring the vibes of the city. Digital nomad and coffee enthusiast.");
     const [isEditing, setIsEditing] = useState(false);
-    const [isUpgrading, setIsUpgrading] = useState(false);
     const [isInterestsOpen, setIsInterestsOpen] = useState(false);
     const [isShareOpen, setIsShareOpen] = useState(false);
     const [myPosts, setMyPosts] = useState<VibePost[]>([]);
@@ -210,19 +213,6 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
     }, []);
 
     const totalWaves = myPosts.reduce((sum, p) => sum + (p.waves || 0), 0);
-
-    const handleBecomePartner = async () => {
-        if (!user) return;
-        setIsUpgrading(true);
-        try {
-            await becomePartner(user.uid);
-            toast({ title: "Welcome, Partner!", description: "Partner and Academy tabs are now unlocked." });
-        } catch {
-            toast({ variant: "destructive", title: "Couldn't upgrade", description: "Please try again." });
-        } finally {
-            setIsUpgrading(false);
-        }
-    };
 
     return (
         <div className="space-y-6">
@@ -378,20 +368,6 @@ function ProfileContent({ profile }: { profile: UserProfile | null }) {
                 </CardFooter>
             </Card>
 
-            {profile && profile.role !== 'partner' && (
-                <Card className="border-primary/20 bg-primary/5 backdrop-blur-xl">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-bold flex items-center gap-2"><LayoutDashboard className="w-4 h-4 text-primary"/> Sell on Moood</CardTitle>
-                        <CardDescription className="text-xs">Unlock the Partner Dashboard and Academy to list products, go live for shopping, and grow a business on Moood.</CardDescription>
-                    </CardHeader>
-                    <CardFooter>
-                        <Button className="w-full rounded-xl h-11 font-bold" onClick={handleBecomePartner} disabled={isUpgrading}>
-                            {isUpgrading ? "Upgrading..." : "Become a Partner"}
-                        </Button>
-                    </CardFooter>
-                </Card>
-            )}
-
             {user && (
                 <InterestPickerDialog
                     open={isInterestsOpen}
@@ -416,7 +392,6 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
     const [isCreateProductOpen, setIsCreateProductOpen] = useState(false);
     const [isCreateStayOpen, setIsCreateStayOpen] = useState(false);
     const [isCreateEventOpen, setIsCreateEventOpen] = useState(false);
-    const [isPromoteOpen, setIsPromoteOpen] = useState(false);
 
     useEffect(() => {
         if (!user) return;
@@ -438,19 +413,14 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
         return subscribeToMyEvents(user.uid, setMyEvents);
     }, [user]);
 
-    // Real numbers pulled from the partner's own wallet transaction history
-    // (Cloud-Function-recorded, not a hardcoded display value): 'sale'
-    // covers products/stays/events (spendFunds crediting the listing's
-    // owner), 'driver-earning' covers Skip rides/deliveries/tow jobs, and
-    // 'gift-received' is a streamer's share of live gifting. Limited to the
-    // last 20 transactions (subscribeToTransactions' cap), so this is
-    // "recent earnings" rather than lifetime - a real dashboard would
-    // aggregate server-side instead of scanning a capped client feed.
-    const marketplaceSales = useMemo(() => transactions.filter(tx => tx.type === 'sale').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
-    const drivingIncome = useMemo(() => transactions.filter(tx => tx.type === 'driver-earning').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
-    const liveGifting = useMemo(() => transactions.filter(tx => tx.type === 'gift-received').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
-    const totalEarnings = marketplaceSales + drivingIncome + liveGifting;
-    const pct = (n: number) => (totalEarnings > 0 ? Math.round((n / totalEarnings) * 100) : 0);
+    // Real number from the partner's own wallet history ('sale' +
+    // 'driver-earning' + 'gift-received', all Cloud-Function-recorded).
+    // The full breakdown lives in the Analytics tab; this is just the
+    // headline figure.
+    const totalEarnings = useMemo(
+        () => transactions.filter(tx => tx.type === 'sale' || tx.type === 'driver-earning' || tx.type === 'gift-received').reduce((sum, tx) => sum + tx.amount, 0),
+        [transactions]
+    );
 
     const handleDeleteListing = async (productId: string) => {
         try {
@@ -501,18 +471,6 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
                     </CardContent>
                 </Card>
             </div>
-
-            <DriverConsoleCard profile={profile} />
-
-            <Card className="border-primary/20 bg-gradient-to-br from-primary/10 to-transparent backdrop-blur-xl">
-                <CardHeader>
-                    <CardTitle className="text-lg font-headline flex items-center gap-2"><Megaphone className="w-5 h-5 text-primary"/> Promote</CardTitle>
-                    <CardDescription>Pay to run a sponsored ad in Vibes and Messages until your promotion runs out.</CardDescription>
-                </CardHeader>
-                <CardFooter>
-                    <Button className="w-full rounded-xl gap-2 h-14 font-bold text-lg shadow-xl shadow-primary/20" onClick={() => setIsPromoteOpen(true)}><Megaphone className="w-5 h-5"/> Promote Something</Button>
-                </CardFooter>
-            </Card>
 
             <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
                 <CardHeader>
@@ -610,6 +568,85 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
                 </CardFooter>
             </Card>
 
+            <CreateListingDialog open={isCreateProductOpen} onOpenChange={setIsCreateProductOpen} profile={profile} />
+            <CreateStayDialog open={isCreateStayOpen} onOpenChange={setIsCreateStayOpen} profile={profile} />
+            <CreateEventDialog open={isCreateEventOpen} onOpenChange={setIsCreateEventOpen} profile={profile} />
+        </div>
+    );
+};
+
+// Category labels for the money-out charts - maps a wallet transaction
+// type to a human-readable spending bucket.
+const SPEND_CATEGORY: Partial<Record<WalletTransaction["type"], string>> = {
+    purchase: "Purchases",
+    send: "Transfers Out",
+    "gift-sent": "Gifts",
+    withdrawal: "Withdrawals",
+};
+
+const AnalyticsTab = () => {
+    const { user } = useAuth();
+    const { currency } = useRegional();
+    const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+    const [myPosts, setMyPosts] = useState<VibePost[]>([]);
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToTransactions(user.uid, setTransactions);
+    }, [user]);
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToMyVibePosts(user.uid, setMyPosts);
+    }, [user]);
+
+    // Earnings mix - same real Cloud-Function-recorded numbers that used to
+    // live buried in the Partner tab, now in their own Analytics home.
+    const marketplaceSales = useMemo(() => transactions.filter(tx => tx.type === 'sale').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
+    const drivingIncome = useMemo(() => transactions.filter(tx => tx.type === 'driver-earning').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
+    const liveGifting = useMemo(() => transactions.filter(tx => tx.type === 'gift-received').reduce((sum, tx) => sum + tx.amount, 0), [transactions]);
+    const totalEarnings = marketplaceSales + drivingIncome + liveGifting;
+    const pct = (n: number) => (totalEarnings > 0 ? Math.round((n / totalEarnings) * 100) : 0);
+
+    const spendData = useMemo(() =>
+        transactions
+            .filter(tx => SPEND_CATEGORY[tx.type])
+            .map(tx => ({
+                item: tx.item || tx.type,
+                date: "",
+                amount: tx.amount,
+                category: SPEND_CATEGORY[tx.type]!,
+            })),
+        [transactions]
+    );
+    const totalSpend = useMemo(() => spendData.reduce((sum, d) => sum + d.amount, 0), [spendData]);
+
+    const totalLikes = myPosts.reduce((sum, p) => sum + (p.likes || 0), 0);
+    const totalWaves = myPosts.reduce((sum, p) => sum + (p.waves || 0), 0);
+
+    return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+                <Card className="bg-zinc-950 text-white border-white/5 shadow-2xl">
+                    <CardHeader className="p-4 pb-0">
+                        <CardTitle className="text-[10px] uppercase tracking-tighter opacity-50 flex items-center gap-1.5"><BarChart className="w-3 h-3"/> Recent Earnings</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-2">
+                        <p className="text-2xl font-bold font-headline tracking-tighter">{currency.symbol} {totalEarnings.toFixed(2)}</p>
+                        <p className="text-[9px] text-white/40 mt-1">Sales, driving & gifts received</p>
+                    </CardContent>
+                </Card>
+                <Card className="bg-zinc-950 text-white border-white/5 shadow-2xl">
+                    <CardHeader className="p-4 pb-0">
+                        <CardTitle className="text-[10px] uppercase tracking-tighter opacity-50 flex items-center gap-1.5"><PieChart className="w-3 h-3"/> Recent Spending</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-2">
+                        <p className="text-2xl font-bold font-headline tracking-tighter">{currency.symbol} {totalSpend.toFixed(2)}</p>
+                        <p className="text-[9px] text-white/40 mt-1">Purchases, transfers & gifts sent</p>
+                    </CardContent>
+                </Card>
+            </div>
+
             <Card className="border-white/10 bg-card/50 overflow-hidden backdrop-blur-xl">
                 <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-bold flex items-center gap-2"><PieChart className="w-4 h-4 text-primary"/> Earnings Mix</CardTitle>
@@ -634,13 +671,222 @@ const PartnerDashboardTab = ({ profile }: { profile: UserProfile | null }) => {
                 </CardContent>
             </Card>
 
-            <CreateListingDialog open={isCreateProductOpen} onOpenChange={setIsCreateProductOpen} profile={profile} />
-            <CreateStayDialog open={isCreateStayOpen} onOpenChange={setIsCreateStayOpen} profile={profile} />
-            <CreateEventDialog open={isCreateEventOpen} onOpenChange={setIsCreateEventOpen} profile={profile} />
+            {spendData.length > 0 ? (
+                <ExpenditureCharts data={spendData} />
+            ) : (
+                <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
+                    <CardContent className="py-10 text-center text-xs text-muted-foreground">
+                        No spending yet - your charts appear here after your first purchase, transfer, or gift.
+                    </CardContent>
+                </Card>
+            )}
+
+            <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2"><Waves className="w-4 h-4 text-cyan-400"/> Vibes Engagement</CardTitle>
+                    <CardDescription className="text-xs">How your posts and Stories are landing.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                        <div>
+                            <p className="text-xl font-bold">{myPosts.length}</p>
+                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Posts</p>
+                        </div>
+                        <div>
+                            <p className="text-xl font-bold">{totalLikes}</p>
+                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Likes</p>
+                        </div>
+                        <div>
+                            <p className="text-xl font-bold">{totalWaves}</p>
+                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Waves</p>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+        </div>
+    );
+};
+
+const PackagesTab = () => {
+    const { user } = useAuth();
+    const { currency } = useRegional();
+    const [myAds, setMyAds] = useState<Ad[]>([]);
+    const [isPromoteOpen, setIsPromoteOpen] = useState(false);
+    const [now, setNow] = useState(() => Date.now());
+
+    useEffect(() => {
+        if (!user) return;
+        return subscribeToMyAds(user.uid, setMyAds);
+    }, [user]);
+
+    useEffect(() => {
+        const interval = setInterval(() => setNow(Date.now()), 60_000);
+        return () => clearInterval(interval);
+    }, []);
+
+    return (
+        <div className="space-y-6">
+            <div className="space-y-3">
+                {(Object.keys(TIER_INFO) as AdTierType[]).map((tier) => {
+                    const info = TIER_INFO[tier];
+                    return (
+                        <Card key={tier} className="border-white/10 bg-card/50 backdrop-blur-xl">
+                            <CardHeader className="pb-2">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-base font-headline flex items-center gap-2">
+                                        {info.label}
+                                        <span className="flex items-center">
+                                            {Array.from({ length: 3 }).map((_, i) => (
+                                                <Star key={i} className={cn("w-3.5 h-3.5", i < info.stars ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30")} />
+                                            ))}
+                                        </span>
+                                    </CardTitle>
+                                    <span className="font-black text-primary">{currency.symbol} {info.pricePerDay}<span className="text-[10px] font-normal text-muted-foreground">/day</span></span>
+                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                <ul className="space-y-1">
+                                    {info.benefits.map((b) => (
+                                        <li key={b} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                                            <CheckCircle className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" /> {b}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </CardContent>
+                        </Card>
+                    );
+                })}
+            </div>
+
+            <Button className="w-full rounded-xl gap-2 h-14 font-bold text-lg shadow-xl shadow-primary/20" onClick={() => setIsPromoteOpen(true)}>
+                <Megaphone className="w-5 h-5"/> Promote Something
+            </Button>
+
+            <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2"><Megaphone className="w-4 h-4 text-primary"/> My Promotions</CardTitle>
+                    <CardDescription className="text-xs">Every ad you've run - active ones disappear from the app on their own when the paid time ends.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                    {myAds.length === 0 ? (
+                        <p className="text-xs text-muted-foreground py-4 text-center">No promotions yet.</p>
+                    ) : (
+                        myAds.map((ad) => {
+                            const expiresMs = ad.expiresAt?.toMillis() ?? 0;
+                            const isActive = expiresMs > now;
+                            const hoursLeft = Math.max(0, Math.round((expiresMs - now) / 3_600_000));
+                            return (
+                                <div key={ad.id} className="p-3 rounded-2xl bg-background/50 border border-white/5 flex items-center gap-3">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <p className="font-bold text-sm truncate">{ad.title}</p>
+                                            <AdTierBadge tier={ad.tier} />
+                                        </div>
+                                        <p className="text-[10px] text-muted-foreground">
+                                            {currency.symbol} {ad.cost} · {ad.durationDays}d · {isActive ? (hoursLeft > 48 ? `${Math.round(hoursLeft / 24)} days left` : `${hoursLeft}h left`) : "Expired"}
+                                        </p>
+                                    </div>
+                                    <Badge variant={isActive ? "default" : "outline"} className="text-[9px] shrink-0">{isActive ? "LIVE" : "ENDED"}</Badge>
+                                </div>
+                            );
+                        })
+                    )}
+                </CardContent>
+            </Card>
+
             <PromoteDialog open={isPromoteOpen} onOpenChange={setIsPromoteOpen} />
         </div>
     );
 };
+
+const RegisterTab = ({ profile }: { profile: UserProfile | null }) => {
+    const { user } = useAuth();
+    const { toast } = useToast();
+    const [isUpgrading, setIsUpgrading] = useState(false);
+    const isPartner = profile?.role === 'partner';
+
+    const handleBecomePartner = async () => {
+        if (!user) return;
+        setIsUpgrading(true);
+        try {
+            await becomePartner(user.uid);
+            toast({ title: "Welcome, Partner!", description: "Partner and Academy tabs are now unlocked." });
+        } catch {
+            toast({ variant: "destructive", title: "Couldn't upgrade", description: "Please try again." });
+        } finally {
+            setIsUpgrading(false);
+        }
+    };
+
+    return (
+        <div className="space-y-6">
+            <Card className={cn("backdrop-blur-xl", isPartner ? "border-green-500/20 bg-green-500/5" : "border-primary/20 bg-primary/5")}>
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                        <LayoutDashboard className={cn("w-4 h-4", isPartner ? "text-green-500" : "text-primary")}/> Partner Account
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                        {isPartner
+                            ? "You're a Moood Partner - selling, hosting, events, driving, and promotions are all unlocked."
+                            : "Unlock the Partner Dashboard and Academy to sell products, host stays, run events, drive on Skip, and promote your business."}
+                    </CardDescription>
+                </CardHeader>
+                <CardFooter>
+                    {isPartner ? (
+                        <Badge className="bg-green-500/20 text-green-500 border-0 gap-1.5"><CheckCircle className="w-3.5 h-3.5" /> Registered Partner</Badge>
+                    ) : (
+                        <Button className="w-full rounded-xl h-11 font-bold" onClick={handleBecomePartner} disabled={isUpgrading}>
+                            {isUpgrading ? "Upgrading..." : "Become a Partner"}
+                        </Button>
+                    )}
+                </CardFooter>
+            </Card>
+
+            {isPartner ? (
+                <DriverConsoleCard profile={profile} />
+            ) : (
+                <Card className="border-white/10 bg-card/50 backdrop-blur-xl opacity-60">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-bold flex items-center gap-2"><Zap className="w-4 h-4 text-primary"/> Skip Driver Console</CardTitle>
+                        <CardDescription className="text-xs">Register as a taxi, courier, or tow driver - become a Partner first to unlock this.</CardDescription>
+                    </CardHeader>
+                </Card>
+            )}
+
+            <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2"><Box className="w-4 h-4 text-primary"/> What You Can Register For</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                    {[
+                        { title: "Sell Products", detail: "List on the Shop marketplace", where: "Partner tab" },
+                        { title: "Host Stays", detail: "List a place, guests pay your wallet", where: "Partner tab" },
+                        { title: "Run Events", detail: "Sell tickets on Links", where: "Partner tab" },
+                        { title: "Drive on Skip", detail: "Taxi, courier & tow jobs", where: "Above" },
+                        { title: "Promote", detail: "Paid ads across the app", where: "Packages tab" },
+                    ].map((row) => (
+                        <div key={row.title} className="p-4 border-b last:border-b-0 border-white/5 flex items-center gap-3">
+                            <div className="flex-1">
+                                <p className="text-sm font-bold">{row.title}</p>
+                                <p className="text-[10px] text-muted-foreground">{row.detail}</p>
+                            </div>
+                            <Badge variant="outline" className="text-[9px]">{row.where}</Badge>
+                        </div>
+                    ))}
+                </CardContent>
+            </Card>
+        </div>
+    );
+};
+
+const PartnerUpsell = () => (
+    <Card className="border-primary/20 bg-primary/5 backdrop-blur-xl">
+        <CardHeader>
+            <CardTitle className="text-base font-headline flex items-center gap-2"><LayoutDashboard className="w-5 h-5 text-primary"/> Partners Only</CardTitle>
+            <CardDescription className="text-xs">This area unlocks once you register as a Partner - head to the Register tab to upgrade (it's free).</CardDescription>
+        </CardHeader>
+    </Card>
+);
 
 const AiCareerCoachCard = () => {
     const [skills, setSkills] = useState("");
@@ -787,16 +1033,31 @@ export default function AccountPage() {
         </div>
 
         <Tabs defaultValue="profile" className="w-full">
-            <TabsList className={cn("grid w-full h-auto bg-muted/50 p-1.5 rounded-2xl mb-8 backdrop-blur-xl border border-white/5", isPartner ? "grid-cols-5" : "grid-cols-3")}>
+            {/* All eight areas are always visible so nothing "disappears" -
+                Partner and Academy show an upgrade prompt for non-partners
+                instead of hiding, and the Register tab is where that
+                upgrade happens. */}
+            <TabsList className="grid w-full grid-cols-4 h-auto bg-muted/50 p-1.5 rounded-2xl mb-8 backdrop-blur-xl border border-white/5 gap-1">
                 <TabsTrigger value="profile" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Profile</TabsTrigger>
+                <TabsTrigger value="analytics" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Analytics</TabsTrigger>
+                <TabsTrigger value="packages" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Packages</TabsTrigger>
                 <TabsTrigger value="wallet" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Wallet</TabsTrigger>
                 <TabsTrigger value="settings" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Settings</TabsTrigger>
-                {isPartner && <TabsTrigger value="partner" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Partner</TabsTrigger>}
-                {isPartner && <TabsTrigger value="academy" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Academy</TabsTrigger>}
+                <TabsTrigger value="register" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Register</TabsTrigger>
+                <TabsTrigger value="partner" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Partner</TabsTrigger>
+                <TabsTrigger value="academy" className="py-2.5 text-[9px] sm:text-xs rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-2xl transition-all">Academy</TabsTrigger>
             </TabsList>
 
             <TabsContent value="profile" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
                 <ProfileContent profile={profile} />
+            </TabsContent>
+
+            <TabsContent value="analytics" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                <AnalyticsTab />
+            </TabsContent>
+
+            <TabsContent value="packages" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                <PackagesTab />
             </TabsContent>
 
             <TabsContent value="wallet" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -807,17 +1068,17 @@ export default function AccountPage() {
                 <SettingsTab />
             </TabsContent>
 
-            {isPartner && (
-                <TabsContent value="partner" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <PartnerDashboardTab profile={profile} />
-                </TabsContent>
-            )}
+            <TabsContent value="register" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                <RegisterTab profile={profile} />
+            </TabsContent>
 
-            {isPartner && (
-                <TabsContent value="academy" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <AcademyTab />
-                </TabsContent>
-            )}
+            <TabsContent value="partner" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                {isPartner ? <PartnerDashboardTab profile={profile} /> : <PartnerUpsell />}
+            </TabsContent>
+
+            <TabsContent value="academy" className="mt-0 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                {isPartner ? <AcademyTab /> : <PartnerUpsell />}
+            </TabsContent>
         </Tabs>
     </div>
   );

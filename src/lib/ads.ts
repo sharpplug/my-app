@@ -111,6 +111,18 @@ export function useActiveAds(vertical: AdVertical, userInterests: string[] = [])
   }, [ads, now, vertical, interestsKey]);
 }
 
+/** A partner's own promotions, active or expired, newest first - for the
+ * Packages tab's "My Promotions" list. Sorted client-side to avoid a
+ * composite index on (ownerUid, createdAt). */
+export function subscribeToMyAds(uid: string, onChange: (ads: Ad[]) => void) {
+  const q = query(adsRef, where("ownerUid", "==", uid));
+  return onSnapshot(q, (snap) => {
+    const ads = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Ad, "id">) }));
+    ads.sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0));
+    onChange(ads);
+  });
+}
+
 export async function purchaseAd(input: {
   title: string;
   description?: string;
