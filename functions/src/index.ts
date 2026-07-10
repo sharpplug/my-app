@@ -562,43 +562,62 @@ export const spendFunds = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
 
     let matchedDriver: { uid: string; handle: string; name: string } | null = null;
 
+    // Match a driver OUTSIDE the money transaction. Dispatch is inherently
+    // best-effort (a driver could go offline between match and pay - we
+    // re-check their wallet inside the tx), so it doesn't need
+    // transactional isolation, and keeping the query out of the
+    // transaction avoids every concurrent ride in a region contending on
+    // the same driver-doc read locks.
+    //
+    // SCALE: pick a RANDOM eligible driver rather than always the first
+    // one. With `.find()`, every concurrent ride in a region that matches
+    // the same service picked the same top-of-query driver and all wrote
+    // that one driver's wallet document - and Firestore caps sustained
+    // writes to a single document at ~1/sec, so a busy region collapsed
+    // into serialized retries on one doc. Randomizing spreads the writes
+    // across the whole active pool (and is fairer dispatch). A true
+    // ride-hailing dispatcher would use a real queue; this removes the
+    // pathological single-doc hotspot without that infrastructure.
+    const candidates = await driversCol()
+      .where("region", "==", region)
+      .where("status", "==", "active")
+      .limit(20)
+      .get();
+    const eligible = candidates.docs.filter((d) => {
+      const services = d.data().services as string[] | undefined;
+      return d.id !== uid && Array.isArray(services) && services.includes(serviceType);
+    });
+    const chosen = eligible.length > 0 ? eligible[Math.floor(Math.random() * eligible.length)] : null;
+
     await db.runTransaction(async (tx) => {
       const wallet = await getWalletBalances(tx, uid);
       if (amount > wallet.balance) {
         throw new HttpsError("failed-precondition", "Insufficient funds.");
       }
 
-      const candidates = await tx.get(
-        driversCol().where("region", "==", region).where("status", "==", "active").limit(20)
-      );
-      const driverDoc = candidates.docs.find((d) => {
-        const services = d.data().services as string[] | undefined;
-        return d.id !== uid && Array.isArray(services) && services.includes(serviceType);
-      });
-
       tx.update(walletRef(uid), { balance: wallet.balance - amount, updatedAt: FieldValue.serverTimestamp() });
       tx.set(transactionsRef(uid).doc(), {
         type: "purchase",
         amount,
         item,
-        driverUid: driverDoc?.id ?? null,
+        driverUid: chosen?.id ?? null,
         createdAt: FieldValue.serverTimestamp(),
       });
 
-      if (driverDoc) {
-        const driver = driverDoc.data() as { ownerHandle: string; ownerName: string };
-        const driverWallet = await getWalletBalances(tx, driverDoc.id);
+      if (chosen) {
+        const driver = chosen.data() as { ownerHandle: string; ownerName: string };
+        const driverWallet = await getWalletBalances(tx, chosen.id);
         if (driverWallet.exists) {
           const driverShare = amount * (1 - DRIVER_FEE_PERCENT);
-          tx.update(walletRef(driverDoc.id), { balance: driverWallet.balance + driverShare, updatedAt: FieldValue.serverTimestamp() });
-          tx.set(transactionsRef(driverDoc.id).doc(), {
+          tx.update(walletRef(chosen.id), { balance: driverWallet.balance + driverShare, updatedAt: FieldValue.serverTimestamp() });
+          tx.set(transactionsRef(chosen.id).doc(), {
             type: "driver-earning",
             amount: driverShare,
             item,
             createdAt: FieldValue.serverTimestamp(),
           });
-          notify(tx, driverDoc.id, "New Ride Earning", `You earned ${driverShare.toFixed(2)} for "${item}".`);
-          matchedDriver = { uid: driverDoc.id, handle: driver.ownerHandle, name: driver.ownerName };
+          notify(tx, chosen.id, "New Ride Earning", `You earned ${driverShare.toFixed(2)} for "${item}".`);
+          matchedDriver = { uid: chosen.id, handle: driver.ownerHandle, name: driver.ownerName };
         }
       }
     });
