@@ -1080,6 +1080,57 @@ export const submitRating = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async
  * `expiresAt > now` instead, so an expired ad simply stops being queried/
  * rendered rather than needing to be deleted.
  */
+// Monthly account tiers (the v2 client's Packages tab). Server-side price
+// list - the client's displayed prices are cosmetic; this map is what
+// actually gets charged, and firestore.rules blocks clients from writing
+// tier/tierExpiresAt themselves, so paying here is the ONLY way to hold a
+// paid tier. "Free" is always settable at no charge (downgrade/expiry).
+const ACCOUNT_TIER_PRICES: Record<string, number> = {
+  Starter: 3,
+  Pro: 7,
+  Elite: 10,
+  Merchant: 10,
+  Enterprise: 15,
+  Mkuu: 20,
+};
+const TIER_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+
+export const purchaseTier = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
+  const uid = requireAuth(request);
+  await enforceRateLimit(uid, "purchaseTier", 10, 60_000);
+  const { tierName } = (request.data ?? {}) as { tierName?: string };
+
+  if (tierName === "Free") {
+    await userRef(uid).set({ tier: "Free", tierExpiresAt: null }, { merge: true });
+    return { ok: true, tier: "Free", expiresAt: null };
+  }
+
+  if (typeof tierName !== "string" || !(tierName in ACCOUNT_TIER_PRICES)) {
+    throw new HttpsError("invalid-argument", "Unknown tier.");
+  }
+
+  const price = ACCOUNT_TIER_PRICES[tierName];
+  const expiresAt = Timestamp.fromMillis(Date.now() + TIER_DURATION_MS);
+
+  await db.runTransaction(async (tx) => {
+    const wallet = await getWalletBalances(tx, uid);
+    if (price > wallet.balance) {
+      throw new HttpsError("failed-precondition", "Insufficient funds.");
+    }
+    tx.update(walletRef(uid), { balance: wallet.balance - price, updatedAt: FieldValue.serverTimestamp() });
+    tx.set(transactionsRef(uid).doc(), {
+      type: "purchase",
+      amount: price,
+      item: `${tierName} Tier (30 days)`,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.set(userRef(uid), { tier: tierName, tierExpiresAt: expiresAt }, { merge: true });
+    notify(tx, uid, "Tier Activated!", `You're now on the ${tierName} tier for 30 days.`);
+  });
+
+  return { ok: true, tier: tierName, expiresAt: expiresAt.toMillis() };
+});
+
 export const purchaseAd = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
   const uid = requireAuth(request);
   await enforceRateLimit(uid, "purchaseAd", 5, 60_000);
