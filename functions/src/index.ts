@@ -1216,6 +1216,12 @@ export const purchaseAd = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
       verticals,
       interestTags: safeInterestTags,
       cost,
+      // Random [0,1) shard so the client can pull a *random window* of
+      // active ads instead of always the same top-N-by-expiry. This is
+      // what lets the display scale to millions of concurrent ads and
+      // still give every ad impressions (fair rotation) - see
+      // subscribeToActiveAds in src/lib/ads.ts.
+      bucket: Math.random(),
       createdAt: FieldValue.serverTimestamp(),
       expiresAt: Timestamp.fromMillis(Date.now() + durationDays * 86_400_000),
     });
