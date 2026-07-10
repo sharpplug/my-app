@@ -60,6 +60,17 @@ const nextConfig = {
         hostname: 'storage.googleapis.com',
         port: '',
         pathname: '/**',
+      },
+      // Google account avatars (photoURL from Google sign-in) - served
+      // from lh3.googleusercontent.com and occasionally other lhN
+      // subdomains. next/image throws (and the error boundary takes the
+      // whole page down) for any host not listed here, so a Google user's
+      // own profile picture crashed the app right after sign-in.
+      {
+        protocol: 'https',
+        hostname: '*.googleusercontent.com',
+        port: '',
+        pathname: '/**',
       }
     ],
   },
