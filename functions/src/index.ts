@@ -184,11 +184,49 @@ async function enforceRateLimit(uid: string, flowKey: string, max: number, windo
 
 async function requireHandle(uid: string): Promise<string> {
   const snap = await userRef(uid).get();
-  const handle = snap.data()?.handle;
-  if (!handle) {
-    throw new HttpsError("failed-precondition", "User profile not found.");
+  const existing = snap.data()?.handle;
+  if (existing) {
+    return existing;
   }
-  return handle;
+
+  // The v2 (moud) client creates users/{uid} without a handle field, so
+  // instead of failing every money-moving call for those accounts, derive
+  // a handle from the profile's name/email, reserve it in /handles (same
+  // uniqueness contract the v1 client used), and persist it - both
+  // codebases then converge on the same identity field.
+  const data = snap.data() ?? {};
+  const base =
+    String(data.displayName || data.email || "user")
+      .split("@")[0]
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "")
+      .slice(0, 20) || "user";
+
+  const candidates = [base];
+  for (let i = 0; i < 5; i++) {
+    candidates.push(`${base}${Math.floor(1000 + Math.random() * 9000)}`);
+  }
+
+  for (const candidate of candidates) {
+    try {
+      await db.runTransaction(async (tx) => {
+        const handleDoc = db.collection("handles").doc(candidate);
+        const handleSnap = await tx.get(handleDoc);
+        if (handleSnap.exists) {
+          throw new HttpsError("already-exists", "HANDLE_TAKEN");
+        }
+        tx.set(handleDoc, { uid });
+        tx.set(userRef(uid), { uid, handle: candidate }, { merge: true });
+      });
+      return candidate;
+    } catch (err) {
+      if (err instanceof HttpsError && err.message === "HANDLE_TAKEN") {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new HttpsError("internal", "Could not reserve a unique handle.");
 }
 
 async function getWalletBalances(tx: Transaction, uid: string) {
