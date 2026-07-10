@@ -6,28 +6,14 @@
     {
       "source": "functions",
       "codebase": "default",
-      "ignore": ["node_modules", ".git", "*.log"],
-      "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"]
-    }
-  ],
-  "apphosting": [
-    {
-      "backendId": "moud",
-      "rootDir": ".",
-      "alwaysDeployFromSource": true,
-      "ignore": ["node_modules", ".git", ".next", "functions/node_modules", "functions/lib", "*.log"]
-    },
-    {
-      "backendId": "moud-1",
-      "rootDir": ".",
-      "alwaysDeployFromSource": true,
-      "ignore": ["node_modules", ".git", ".next", "functions/node_modules", "functions/lib", "*.log"]
-    },
-    {
-      "backendId": "moud-2",
-      "rootDir": ".",
-      "alwaysDeployFromSource": true,
-      "ignore": ["node_modules", ".git", ".next", "functions/node_modules", "functions/lib", "*.log"]
+      "ignore": [
+        "node_modules",
+        ".git",
+        "*.log"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
     }
   ]
 }
