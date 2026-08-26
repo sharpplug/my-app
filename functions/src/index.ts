@@ -1235,3 +1235,363 @@ export const purchaseAd = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (
 
   return { ok: true, adId: adRef.id };
 });
+
+// ---------------------------------------------------------------------------
+// UNIDEL - campus delivery
+// ---------------------------------------------------------------------------
+//
+// A delivery is the first thing in this app where money is taken up front but
+// earned later, so it can't reuse spendFunds: the fee is debited when the job
+// is posted and sits with the platform (credited to nobody) until the runner
+// proves the drop-off happened. Everything that can move that held money -
+// releasing it to a runner, or refunding it - is one of the functions below.
+//
+// The state machine is deliberately one-way except for cancellation:
+//   open -> accepted -> picked_up -> delivered
+//   open|accepted -> cancelled (customer, full refund)
+// Each transition re-reads the delivery inside a transaction and asserts the
+// status it expects, so two runners racing to accept the same job can't both
+// win, and a replayed "complete" call can't pay a runner twice.
+
+/** Mirrors baseFee in src/lib/campuses.ts. Duplicated rather than imported
+ * because functions/ is a separate TypeScript project that can't reach into
+ * src/ - the same reason TRANSACTION_FEE_PERCENT is repeated at the top of
+ * this file. The client's quote is advisory; this table is what's charged. */
+const CAMPUS_BASE_FEE: Record<string, number> = {
+  uon: 80,
+  ku: 70,
+  strath: 90,
+  mak: 3000,
+  uct: 25,
+  wits: 28,
+  uaeu: 8,
+  aus: 10,
+};
+
+const UNIDEL_EXPRESS_MULTIPLIER = 1.5;
+const UNIDEL_FEE_PERCENT = 0.12;
+/** Wrong codes per delivery before the runner has to hand it back to the
+ * customer - a 4-digit code is only meaningful if it can't be brute-forced. */
+const MAX_CODE_ATTEMPTS = 5;
+
+const deliveriesCol = () => db.collection("deliveries");
+const deliveryRef = (id: string) => deliveriesCol().doc(id);
+const dropoffCodeRef = (id: string) => deliveryRef(id).collection("secret").doc("code");
+const runnerRef = (uid: string) => db.collection("runners").doc(uid);
+
+type DeliveryDoc = {
+  customerUid: string;
+  customerHandle: string;
+  campusId: string;
+  pickupPointId: string;
+  dropoffPointId: string;
+  itemDescription: string;
+  express: boolean;
+  fee: number;
+  runnerShare: number;
+  status: "open" | "accepted" | "picked_up" | "delivered" | "cancelled";
+  runnerUid: string | null;
+  runnerHandle: string | null;
+  codeAttempts?: number;
+};
+
+function money(amount: number): number {
+  return Math.round(amount * 100) / 100;
+}
+
+/** Campus point ids are namespaced by their campus ("uon-hall6"), which is
+ * enough to reject a point that belongs to a different university without
+ * duplicating the whole landmark list from src/lib/campuses.ts here. */
+function requireCampusPoint(campusId: string, pointId: unknown, label: string): string {
+  if (typeof pointId !== "string" || !pointId.startsWith(`${campusId}-`)) {
+    throw new HttpsError("invalid-argument", `${label} must be a point on this campus.`);
+  }
+  return pointId;
+}
+
+/** Loads a delivery for a transition and checks the caller is allowed to
+ * make it. Reads happen through the transaction so the status check and the
+ * write that follows it are atomic. */
+async function loadDeliveryForTransition(
+  tx: Transaction,
+  deliveryId: string,
+  expect: { status: DeliveryDoc["status"][]; actor: "customer" | "runner"; uid: string }
+): Promise<DeliveryDoc> {
+  const snap = await tx.get(deliveryRef(deliveryId));
+  if (!snap.exists) {
+    throw new HttpsError("not-found", "Delivery not found.");
+  }
+  const delivery = snap.data() as DeliveryDoc;
+  const owner = expect.actor === "customer" ? delivery.customerUid : delivery.runnerUid;
+  if (owner !== expect.uid) {
+    throw new HttpsError("permission-denied", "This isn't your delivery.");
+  }
+  if (!expect.status.includes(delivery.status)) {
+    throw new HttpsError("failed-precondition", `This delivery is already ${delivery.status}.`);
+  }
+  return delivery;
+}
+
+export const createDelivery = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
+  const uid = requireAuth(request);
+  await enforceRateLimit(uid, "createDelivery", 10, 60_000);
+  const { campusId, pickupPointId, dropoffPointId, itemDescription, notes, express } = (request.data ?? {}) as {
+    campusId?: string;
+    pickupPointId?: string;
+    dropoffPointId?: string;
+    itemDescription?: string;
+    notes?: string;
+    express?: boolean;
+  };
+
+  if (typeof campusId !== "string" || !(campusId in CAMPUS_BASE_FEE)) {
+    throw new HttpsError("invalid-argument", "Unknown campus.");
+  }
+  const pickup = requireCampusPoint(campusId, pickupPointId, "Pickup");
+  const dropoff = requireCampusPoint(campusId, dropoffPointId, "Drop-off");
+  if (pickup === dropoff) {
+    throw new HttpsError("invalid-argument", "Pickup and drop-off must be different points.");
+  }
+  if (typeof itemDescription !== "string" || !itemDescription.trim()) {
+    throw new HttpsError("invalid-argument", "Tell the runner what they're collecting.");
+  }
+
+  const isExpress = express === true;
+  const fee = Math.round(CAMPUS_BASE_FEE[campusId] * (isExpress ? UNIDEL_EXPRESS_MULTIPLIER : 1));
+  const runnerShare = money(fee * (1 - UNIDEL_FEE_PERCENT));
+  const handle = await requireHandle(uid);
+  const ref = deliveriesCol().doc();
+  const code = String(Math.floor(1000 + Math.random() * 9000));
+
+  await db.runTransaction(async (tx) => {
+    const wallet = await getWalletBalances(tx, uid);
+    if (fee > wallet.balance) {
+      throw new HttpsError("failed-precondition", "Insufficient funds.");
+    }
+
+    // Debited now, credited to nobody: this is the escrow. completeDelivery
+    // pays it out, cancelDelivery hands it back.
+    tx.update(walletRef(uid), { balance: wallet.balance - fee, updatedAt: FieldValue.serverTimestamp() });
+    tx.set(transactionsRef(uid).doc(), {
+      type: "delivery-payment",
+      amount: fee,
+      item: `UNIDEL delivery${isExpress ? " (express)" : ""}`,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.set(ref, {
+      customerUid: uid,
+      customerHandle: handle,
+      campusId,
+      pickupPointId: pickup,
+      dropoffPointId: dropoff,
+      itemDescription: itemDescription.trim().slice(0, 280),
+      notes: (notes ?? "").trim().slice(0, 280),
+      express: isExpress,
+      fee,
+      runnerShare,
+      status: "open",
+      runnerUid: null,
+      runnerHandle: null,
+      codeAttempts: 0,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    // Kept off the delivery document itself - the job board is readable by
+    // every signed-in user, including the runner this code is meant to test.
+    tx.set(dropoffCodeRef(ref.id), { code, customerUid: uid });
+  });
+
+  return { ok: true, deliveryId: ref.id, fee };
+});
+
+export const acceptDelivery = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
+  const uid = requireAuth(request);
+  await enforceRateLimit(uid, "acceptDelivery", 20, 60_000);
+  const { deliveryId } = (request.data ?? {}) as { deliveryId?: string };
+  if (typeof deliveryId !== "string" || !deliveryId) {
+    throw new HttpsError("invalid-argument", "deliveryId is required.");
+  }
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(deliveryRef(deliveryId));
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "Delivery not found.");
+    }
+    const delivery = snap.data() as DeliveryDoc;
+    if (delivery.status !== "open") {
+      throw new HttpsError("failed-precondition", "Another runner already took this one.");
+    }
+    if (delivery.customerUid === uid) {
+      throw new HttpsError("failed-precondition", "You can't run your own delivery.");
+    }
+
+    // Registration is a client write (src/lib/deliveries.ts), so it's checked
+    // again here - this is the point where believing it would cost money.
+    const runnerSnap = await tx.get(runnerRef(uid));
+    if (!runnerSnap.exists) {
+      throw new HttpsError("failed-precondition", "Register as a runner first.");
+    }
+    const runner = runnerSnap.data() as { campusId: string; status: string };
+    if (runner.status !== "active") {
+      throw new HttpsError("failed-precondition", "Your runner account isn't active.");
+    }
+    if (runner.campusId !== delivery.campusId) {
+      throw new HttpsError("failed-precondition", "That delivery is on a different campus.");
+    }
+
+    const handle = runnerSnap.data()?.ownerHandle ?? null;
+    tx.update(deliveryRef(deliveryId), {
+      status: "accepted",
+      runnerUid: uid,
+      runnerHandle: handle,
+      acceptedAt: FieldValue.serverTimestamp(),
+    });
+    notify(
+      tx,
+      delivery.customerUid,
+      "A Runner Took Your Delivery",
+      `@${handle ?? "a runner"} is on the way to collect it.`
+    );
+  });
+
+  return { ok: true };
+});
+
+export const markDeliveryPickedUp = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
+  const uid = requireAuth(request);
+  await enforceRateLimit(uid, "markDeliveryPickedUp", 20, 60_000);
+  const { deliveryId } = (request.data ?? {}) as { deliveryId?: string };
+  if (typeof deliveryId !== "string" || !deliveryId) {
+    throw new HttpsError("invalid-argument", "deliveryId is required.");
+  }
+
+  await db.runTransaction(async (tx) => {
+    const delivery = await loadDeliveryForTransition(tx, deliveryId, {
+      status: ["accepted"],
+      actor: "runner",
+      uid,
+    });
+    tx.update(deliveryRef(deliveryId), {
+      status: "picked_up",
+      pickedUpAt: FieldValue.serverTimestamp(),
+    });
+    notify(
+      tx,
+      delivery.customerUid,
+      "Your Delivery Is On The Move",
+      "Have your 4-digit drop-off code ready - the runner needs it to finish.",
+    );
+  });
+
+  return { ok: true };
+});
+
+export const completeDelivery = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
+  const uid = requireAuth(request);
+  await enforceRateLimit(uid, "completeDelivery", 20, 60_000);
+  const { deliveryId, code } = (request.data ?? {}) as { deliveryId?: string; code?: string };
+  if (typeof deliveryId !== "string" || !deliveryId) {
+    throw new HttpsError("invalid-argument", "deliveryId is required.");
+  }
+  if (typeof code !== "string" || !code.trim()) {
+    throw new HttpsError("invalid-argument", "Ask the customer for their drop-off code.");
+  }
+
+  // A wrong code has to *commit* the incremented attempt counter, so the
+  // mismatch is reported by returning out of the transaction rather than
+  // throwing inside it - throwing would roll the increment back and leave
+  // the 4-digit code free to brute-force.
+  const triesLeft = await db.runTransaction(async (tx) => {
+    const delivery = await loadDeliveryForTransition(tx, deliveryId, {
+      status: ["picked_up"],
+      actor: "runner",
+      uid,
+    });
+
+    const attempts = delivery.codeAttempts ?? 0;
+    if (attempts >= MAX_CODE_ATTEMPTS) {
+      throw new HttpsError("failed-precondition", "Too many wrong codes - ask the customer to cancel and repost.");
+    }
+
+    const codeSnap = await tx.get(dropoffCodeRef(deliveryId));
+    const expected = codeSnap.data()?.code as string | undefined;
+
+    // The escrow release below needs this read, and Firestore requires every
+    // read in a transaction to happen before the first write - including the
+    // attempt-counter write on the failure path.
+    const runnerWallet = await getWalletBalances(tx, uid);
+
+    if (!expected || code.trim() !== expected) {
+      tx.update(deliveryRef(deliveryId), { codeAttempts: attempts + 1 });
+      return MAX_CODE_ATTEMPTS - attempts - 1;
+    }
+
+    if (!runnerWallet.exists) {
+      throw new HttpsError("not-found", "Runner wallet not found.");
+    }
+
+    tx.update(walletRef(uid), {
+      balance: runnerWallet.balance + delivery.runnerShare,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    tx.set(transactionsRef(uid).doc(), {
+      type: "delivery-earning",
+      amount: delivery.runnerShare,
+      item: `UNIDEL run: ${delivery.itemDescription}`,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(deliveryRef(deliveryId), {
+      status: "delivered",
+      deliveredAt: FieldValue.serverTimestamp(),
+    });
+    notify(tx, delivery.customerUid, "Delivered", `"${delivery.itemDescription}" has been dropped off.`);
+    notify(tx, uid, "Run Complete", `You earned ${delivery.runnerShare.toFixed(2)} for that delivery.`);
+    return null;
+  });
+
+  // Thrown out here, after the counter above has actually been committed.
+  if (triesLeft !== null) {
+    throw new HttpsError("permission-denied", `That code doesn't match. ${triesLeft} ${triesLeft === 1 ? "try" : "tries"} left.`);
+  }
+
+  return { ok: true };
+});
+
+export const cancelDelivery = onCall({ enforceAppCheck: ENFORCE_APP_CHECK }, async (request) => {
+  const uid = requireAuth(request);
+  await enforceRateLimit(uid, "cancelDelivery", 20, 60_000);
+  const { deliveryId } = (request.data ?? {}) as { deliveryId?: string };
+  if (typeof deliveryId !== "string" || !deliveryId) {
+    throw new HttpsError("invalid-argument", "deliveryId is required.");
+  }
+
+  await db.runTransaction(async (tx) => {
+    // Only before pickup: once a runner is holding the goods, calling this
+    // off is a dispute rather than a refund, and nothing here can judge that.
+    const delivery = await loadDeliveryForTransition(tx, deliveryId, {
+      status: ["open", "accepted"],
+      actor: "customer",
+      uid,
+    });
+
+    const wallet = await getWalletBalances(tx, uid);
+    tx.update(walletRef(uid), {
+      balance: wallet.balance + delivery.fee,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    tx.set(transactionsRef(uid).doc(), {
+      type: "delivery-refund",
+      amount: delivery.fee,
+      item: "UNIDEL delivery cancelled",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(deliveryRef(deliveryId), {
+      status: "cancelled",
+      cancelledAt: FieldValue.serverTimestamp(),
+    });
+    if (delivery.runnerUid) {
+      notify(tx, delivery.runnerUid, "Delivery Cancelled", "A job you accepted was called off by the customer.");
+    }
+  });
+
+  return { ok: true };
+});

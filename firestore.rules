@@ -224,6 +224,55 @@ service cloud.firestore {
       }
     }
 
+    // UNIDEL campus deliveries (src/lib/deliveries.ts). A delivery holds the
+    // customer's money from the moment it's created, so - exactly like
+    // wallets - it is read-only from the client and every transition
+    // (accept, pick up, complete, cancel) runs through a Cloud Function with
+    // the Admin SDK. Reads are open to any signed-in user because the job
+    // board is the whole point: a runner has to be able to see unclaimed
+    // jobs before they have any relationship to them.
+    match /deliveries/{deliveryId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+
+      // The drop-off code the runner has to quote to release the escrow.
+      // It lives down here, rather than as a field on the delivery above,
+      // precisely because that document is world-readable to signed-in
+      // users - only the customer may ever read this.
+      match /secret/{docId} {
+        allow read: if request.auth != null && request.auth.uid == resource.data.customerUid;
+        allow write: if false;
+      }
+    }
+
+    // UNIDEL runner registrations - the student-courier equivalent of
+    // /drivers, doc ID == the runner's own uid. Two deliberate differences
+    // from drivers: there's no `partner` role check (runners are students,
+    // not registered businesses), and status/campus are re-read server-side
+    // by acceptDelivery, so a client editing its own profile here can't
+    // claim jobs it isn't eligible for.
+    match /runners/{uid} {
+      function isOwnActiveRunner() {
+        return request.auth != null && request.auth.uid == uid
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.status == 'active';
+      }
+
+      allow read: if request.auth != null;
+      // Split create from update because noRatingTamper() compares against
+      // resource.data, which doesn't exist yet on a create - a brand new
+      // profile instead just has to arrive without any rating fields on it.
+      allow create: if isOwnActiveRunner()
+        && !request.resource.data.keys().hasAny(['ratingSum', 'ratingCount']);
+      allow update: if isOwnActiveRunner() && noRatingTamper();
+      allow delete: if request.auth != null && request.auth.uid == uid;
+
+      match /reviews/{reviewId} {
+        allow read: if request.auth != null;
+        allow write: if false;
+      }
+    }
+
     // Live location for the Vibes Map / Ghost Mode. Ghost Mode works by
     // simply not having a document here at all, so there's nothing for
     // other users to read - no "hidden" flag that a client could ignore.

@@ -25,7 +25,24 @@ export type Wallet = {
 
 export type WalletTransaction = {
   id: string;
-  type: "send" | "receive" | "topup" | "withdrawal" | "swap" | "gift-sent" | "gift-received" | "purchase" | "sale" | "driver-earning";
+  type:
+    | "send"
+    | "receive"
+    | "topup"
+    | "withdrawal"
+    | "swap"
+    | "gift-sent"
+    | "gift-received"
+    | "purchase"
+    | "sale"
+    | "driver-earning"
+    // UNIDEL (src/lib/deliveries.ts). Unlike a purchase, a delivery-payment
+    // isn't earned by anyone yet - it's held until the drop-off is confirmed,
+    // and turns into either a delivery-earning for the runner or a
+    // delivery-refund back to the customer.
+    | "delivery-payment"
+    | "delivery-earning"
+    | "delivery-refund";
   amount: number;
   fee?: number;
   recipient?: string;
