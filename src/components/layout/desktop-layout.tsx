@@ -1,6 +1,6 @@
 "use client";
 
-import { Car, ShoppingBag, User, Waves, Ticket, Mic, Plus, Package } from "lucide-react";
+import { Car, ShoppingBag, User, Waves, Ticket, Mic, Plus } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import React, { useState, useEffect } from 'react';
@@ -20,7 +20,6 @@ const navItems = [
     { href: "/shop", label: "Shop", icon: ShoppingBag },
     { href: "/events", label: "Links", icon: Ticket },
     { href: "/skip", label: "SKIP", icon: Car },
-    { href: "/unidel", label: "UNIDEL", icon: Package },
     { href: "/account", label: "Account", icon: User },
 ];
 
